@@ -1,11 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import {fileURLToPath,pathToFileURL} from 'node:url';
+import {fileURLToPath} from 'node:url';
+import {loadPlaywright} from './browser-runtime.mjs';
 
 const root=fileURLToPath(new URL('..',import.meta.url));
-const playwright=process.env.PLAYWRIGHT_MODULE || path.join(process.env.USERPROFILE,'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');
-const {_electron}=await import(pathToFileURL(playwright));
+const {_electron}=await loadPlaywright();
 const env={...process.env,MANUX_MOUSE_DRY_RUN:'1',MANUX_DESKTOP_PORT:'0'};
 delete env.ELECTRON_RUN_AS_NODE;
 const application=await _electron.launch({
