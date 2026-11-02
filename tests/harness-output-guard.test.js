@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, open, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, open, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
@@ -118,7 +118,7 @@ test('project root aliases accept the same public file without allowing hidden t
   const message = input(interim);
   message.tool_input.files = [join(alias, 'docs', 'guide.md')];
   assert.deepEqual(await evaluateHook(message, { root: alias }), {});
-  message.tool_input.files = [join(root, 'docs', 'guide.md')];
+  message.tool_input.files = [join(await realpath(root), 'docs', 'guide.md')];
   assert.deepEqual(await evaluateHook(message, { root: alias }), {});
   message.tool_input.files = [join(alias, '.local', 'harness', taskExample.requestId, 'task.json')];
   assert.equal((await evaluateHook(message, { root: alias })).hookSpecificOutput.permissionDecision, 'deny');
