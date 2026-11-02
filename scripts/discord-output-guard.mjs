@@ -34,16 +34,20 @@ async function validateAttachments(files, root) {
   try {
     if (!Array.isArray(files) || files.length > 10) throw new Error('attachments');
     if (!files.length) return;
+    const lexicalRoot = resolve(root);
     const actualRoot = await realpath(root);
-    const safeRelativePath = target => {
-      const path = relative(actualRoot, target).split(sep).join('/');
-      return contained(actualRoot, target) && isSafeProjectPath(path)
+    const safeRelativePath = (base, target) => {
+      const path = relative(base, target).split(sep).join('/');
+      return contained(base, target) && isSafeProjectPath(path)
         && path.split('/').every(part => !part.startsWith('.'));
     };
     for (const file of files) {
-      if (typeof file !== 'string' || !file.isWellFormed() || !isAbsolute(file) || !safeRelativePath(resolve(file))) throw new Error('attachment path');
+      if (typeof file !== 'string' || !file.isWellFormed() || !isAbsolute(file)) throw new Error('attachment path');
+      // Windows may provide a short temp path while realpath returns its long name.
+      // Check both root spellings, then independently confine the resolved target.
+      if (!safeRelativePath(lexicalRoot, resolve(file)) && !safeRelativePath(actualRoot, resolve(file))) throw new Error('attachment path');
       const actual = await realpath(file);
-      if (!safeRelativePath(actual)) throw new Error('attachment target');
+      if (!safeRelativePath(actualRoot, actual)) throw new Error('attachment target');
       const info = await stat(actual);
       if (!info.isFile() || info.size > 25 * 1024 * 1024) throw new Error('attachment file');
     }

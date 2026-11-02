@@ -98,6 +98,32 @@ test('reply attachments reject external, hidden, sensitive and invalid paths wit
   }
 });
 
+test('project root aliases accept the same public file without allowing hidden targets', async t => {
+  const { root } = await fixture(t);
+  const alias = `${root}-alias`;
+  await mkdir(join(root, 'docs'));
+  await writeFile(join(root, 'docs', 'guide.md'), 'synthetic documentation fixture');
+  try {
+    await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (!['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) throw error;
+    t.skip('This environment does not permit creating symbolic links/junctions.');
+    return;
+  }
+  t.after(async () => {
+    assert.equal(dirname(resolve(alias)), resolve(tmpdir()));
+    assert.equal(basename(alias), `${basename(root)}-alias`);
+    await rm(alias, { recursive: true, force: true });
+  });
+  const message = input(interim);
+  message.tool_input.files = [join(alias, 'docs', 'guide.md')];
+  assert.deepEqual(await evaluateHook(message, { root: alias }), {});
+  message.tool_input.files = [join(root, 'docs', 'guide.md')];
+  assert.deepEqual(await evaluateHook(message, { root: alias }), {});
+  message.tool_input.files = [join(alias, '.local', 'harness', taskExample.requestId, 'task.json')];
+  assert.equal((await evaluateHook(message, { root: alias })).hookSpecificOutput.permissionDecision, 'deny');
+});
+
 test('attachment directory links cannot redirect into private project storage', async t => {
   const { root } = await fixture(t);
   const hidden = join(root, '.local', 'private');
