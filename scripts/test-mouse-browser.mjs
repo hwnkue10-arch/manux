@@ -1,15 +1,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {pathToFileURL, fileURLToPath} from 'node:url';
+import {fileURLToPath} from 'node:url';
+import {loadPlaywright, browserOptions} from './browser-runtime.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from '../server.js';
 import {hand} from '../tests/helpers/mouse-hand.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const playwright = process.env.PLAYWRIGHT_MODULE || path.join(process.env.USERPROFILE,'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');
-const {chromium} = await import(pathToFileURL(playwright));
+const {chromium} = await loadPlaywright();
 const server = createServer(); await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-const browser = await chromium.launch({channel:'chrome',headless:true});
+const browser = await chromium.launch(browserOptions());
 const context = await browser.newContext({viewport:{width:1440,height:1100}});
 const page = await context.newPage();
 const errors = [];
