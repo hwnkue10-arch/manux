@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="docs/images/logo.svg" width="140" alt="ManuX Air Mouse Logo" />
+  <img src="public/assets/manux.svg" width="340" alt="MANUX Logo" />
 
   # 🖐️ ManuX: Next-Gen AI Vision Air Mouse
 
@@ -21,13 +21,6 @@
     <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="License" />
   </p>
 
-</div>
-
----
-
-<div align="center">
-  <img src="docs/images/air-mouse-pose.png" width="460" alt="실제 웹캠 21개 관절 트래킹 및 조작 기본 자세" style="border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
-  <p><em>▲ 실제 웹캠 환경에서 검지 포인터(LM 8) 및 손 관절 랜드마크가 정밀 추적되는 기본 조작 자세</em></p>
 </div>
 
 ---
