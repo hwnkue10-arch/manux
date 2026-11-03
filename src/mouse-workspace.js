@@ -4,9 +4,9 @@ const LABELS = {
   idle:'쉬는 중 (주먹/휴식)',
   move:'👆 포인터 이동 (검지)',
   left:'🤏 좌클릭 · 드래그 (엄지+중지)',
-  right:'👆 우클릭 (엄지+소지)',
-  scroll:'✌️ 폰 터치 스크롤 (제스처 2)',
-  both:'🤏 좌우 동시 클릭'
+  right:'👆 우클릭 (엄지+약지)',
+  scroll:'✌️ 폰 터치 스크롤 (검지+중지)',
+  both:'🤏 좌우 동시 클릭 (엄지+중지+약지)'
 };
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -248,7 +248,7 @@ export class MouseWorkspace {
       }
       if (generation !== this.generation || !this.ready || !this.active) return;
       this.controller.reset(); this.enabled = true; this.lastFrame = performance.now();
-      this.status('👆 검지를 펴 포인터를 이동하세요. 엄지+중지(좌클릭·드래그) · 엄지+소지(우클릭) · ✌️ 폰 스크롤입니다.');
+      this.status('👆 검지로 포인터를 이동하세요. 엄지+중지(좌클릭·드래그) · 엄지+약지(우클릭) · ✌️ 폰 스크롤입니다.');
     } catch (error) { this.stop(error.message); }
     finally { this.pending = false; this.refresh(); }
   }
@@ -323,10 +323,11 @@ export class MouseWorkspace {
     const idx = mapPoint(state.fingertips.index);
     const thm = mapPoint(state.fingertips.thumb);
     const mid = mapPoint(state.fingertips.middle);
+    const rng = state.fingertips.ring ? mapPoint(state.fingertips.ring) : null;
     const pnk = state.fingertips.pinky ? mapPoint(state.fingertips.pinky) : null;
 
     // Connecting laser line between Thumb (4) and Middle (12) during left click / drag
-    if (state.mode === 'left') {
+    if (state.mode === 'left' || state.mode === 'both') {
       ctx.save();
       ctx.strokeStyle = '#10b981';
       ctx.lineWidth = 4;
@@ -343,8 +344,8 @@ export class MouseWorkspace {
       ctx.restore();
     }
 
-    // Connecting laser line between Thumb (4) and Pinky (20) during right click
-    if (state.mode === 'right' && pnk) {
+    // Connecting laser line between Thumb (4) and Ring (16) during right click
+    if ((state.mode === 'right' || state.mode === 'both') && rng) {
       ctx.save();
       ctx.strokeStyle = '#3b82f6';
       ctx.lineWidth = 4;
@@ -352,12 +353,12 @@ export class MouseWorkspace {
       ctx.shadowBlur = 14;
       ctx.beginPath();
       ctx.moveTo(thm.x, thm.y);
-      ctx.lineTo(pnk.x, pnk.y);
+      ctx.lineTo(rng.x, rng.y);
       ctx.stroke();
 
       ctx.fillStyle = '#3b82f6';
       ctx.font = 'bold 12px "Segoe UI", sans-serif';
-      ctx.fillText('👆 우클릭', (thm.x + pnk.x) / 2 + 15, (thm.y + pnk.y) / 2);
+      ctx.fillText('👆 우클릭', (thm.x + rng.x) / 2 + 15, (thm.y + rng.y) / 2);
       ctx.restore();
     }
 
@@ -410,19 +411,19 @@ export class MouseWorkspace {
     ctx.stroke();
     ctx.restore();
 
-    // Pinky Point (Sapphire Blue Glow - Right Click)
-    if (pnk) {
+    // Ring Point (Sapphire Blue Glow - Right Click)
+    if (rng) {
       ctx.save();
       ctx.fillStyle = '#3b82f6';
       ctx.shadowColor = '#3b82f6';
       ctx.shadowBlur = 12;
       ctx.beginPath();
-      ctx.arc(pnk.x, pnk.y, 6, 0, Math.PI * 2);
+      ctx.arc(rng.x, rng.y, 6, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = '#dbeafe';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(pnk.x, pnk.y, 12, 0, Math.PI * 2);
+      ctx.arc(rng.x, rng.y, 12, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }

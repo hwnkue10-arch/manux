@@ -44,8 +44,9 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
   // Clenched fingers count: fingers curled tightly into palm
   const clenchedCount = [8, 12, 16, 20].filter(tip => dist2D(points[tip], points[0]) < palm * 1.05).length;
+  // In index mode, if index is extended pointing up, it is NEVER a fist! Only curled index + clenched fingers count as fist.
   const isFist = pointerMode === 'index'
-    ? (clenchedCount >= 3 || (!index && clenchedCount >= 2))
+    ? (!index && (clenchedCount >= 3 || (!middle && clenchedCount >= 2)))
     : (clenchedCount >= 2);
 
   // Reachable pinch tips must extend away from the wrist, and thumb must extend from wrist
@@ -54,7 +55,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     dist2D(points[tip], points[base]) > palm * 0.32 &&
     dist2D(points[4], points[0]) > palm * 0.60;
 
-  // Exclusive left and right pinch detection (prevents index dipping during middle pinch)
+  // Exclusive left and right pinch detection (legacy palm mode)
   const isLeftPinch = reachable(8, 5) && dIndex < (previousPinch === 'left' ? 0.47 : 0.35) && dMiddle > dIndex * 1.15;
   const isRightPinch = reachable(12, 9) && dMiddle < (previousPinch === 'right' ? 0.47 : 0.38) && dIndex > dMiddle * 1.18;
   const isBothPinch = reachable(8, 5) && reachable(12, 9) && dIndex < 0.38 && dMiddle < 0.40;
@@ -66,74 +67,54 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const twoFingerClutch = !isBothPinch && !isLeftPinch && !isRightPinch && dIndex > 0.42 && dMiddle > 0.42 && dTwoFinger < 0.22;
   const isSmartphoneScroll = allowVScroll && (isPeaceGesture || twoFingerClutch);
 
-  // Thumb extended outward (for Pistol/Trigger click gesture)
-  const thumbOut = dist2D(points[4], points[5]) > palm * 0.90 && dist2D(points[4], points[9]) > palm * 1.05;
-
   let mode = 'idle';
   let pinch = null;
   let anchor = null;
 
   if (pointerMode === 'index') {
-    // === ERGONOMIC PARADIGM: Index Pointer + Thumb/Middle Left Click + Thumb/Pinky Right Click ===
-    // 1. Cursor strictly follows Index Tip (LM 8) - index never moves or bends for clicking!
-    // 2. Left Click & Continuous Drag: Thumb (LM 4) + Middle (LM 12) pinch
-    // 3. Right Click: Thumb (LM 4) + Pinky (LM 20) pinch
-    // 4. Smartphone Touch Scroll: Index + Middle extended (✌️ Peace)
-    // 5. Rest / Idle: Fist (0), 5-finger open palm, or any non-pointing pose = 100% IDLE!
-    //    Clicks are strictly blocked when in a fist or when index is not pointing up.
+    // === ERGONOMIC PARADIGM: Independent Left/Right Click + Always Track Index Tip ===
+    // 1. Pointer: Cursor always tracks Index Tip (LM 8) whenever not a fist (주먹).
+    // 2. Left Click: Thumb (LM 4) + Middle (LM 12) pinch. Independent!
+    // 3. Right Click: Thumb (LM 4) + Ring (LM 16) pinch. Independent!
+    // 4. Simultaneous Click: If both touch thumb, BOTH left and right are active!
+    // 5. V-sign Scroll: Index + Middle extended. V-sign takes strict precedence over right click so curled ring never triggers right click.
+    // 6. Rest / Idle: Strictly Fist (주먹: all curled).
 
-    // 1. Gesture 2: Smartphone Touch Scroll (Index + Middle extended, Ring + Pinky curled, Thumb unpinched)
-    const isScrollGesture = allowVScroll && index && middle && !ring && !pinky && dMiddle > 0.38 && dPinky > 0.40;
+    // Gesture 2: Smartphone Touch Scroll (✌️ Peace: Index & Middle extended, Ring & Pinky curled, unpinched)
+    const isScrollGesture = allowVScroll && index && middle && !ring && !pinky && dMiddle > 0.38;
 
-    // 2. Right Click: Thumb (LM 4) + Pinky (LM 20) touch
-    //    Strict: only when index is pointing (not in fist), pinky is close (< 0.28), and clearly closer than middle
-    const isPinkyRight = index && !isFist &&
-      dPinky < (previousPinch === 'right' ? 0.36 : 0.28) &&
-      dPinky < dMiddle * 0.85;
+    // Independent Left Click: Thumb + Middle touch
+    const isLeft = !isFist && !isScrollGesture && (dMiddle < (previousPinch === 'left' || previousPinch === 'both' ? 0.35 : 0.28));
 
-    // 3. Left Click: Thumb (LM 4) + Middle (LM 12) touch
-    //    Strict: only when index is pointing (not in fist), middle is close (< 0.28), and clearly closer than pinky
-    const isMiddleLeft = index && !isFist && !isPinkyRight &&
-      dMiddle < (previousPinch === 'left' ? 0.36 : 0.28) &&
-      dMiddle < dPinky * 0.85;
+    // Independent Right Click: Thumb + Ring touch (suppressed during V-sign scroll so curled ring cannot falsely trigger right click)
+    const isRight = !isFist && !isScrollGesture && (dRing < (previousPinch === 'right' || previousPinch === 'both' ? 0.35 : 0.28));
 
-    // Direct Index + Thumb pinch compatibility fallback
-    const isIndexLeftCompat = index && !isFist && !isPinkyRight && !isMiddleLeft &&
-      dIndex < (previousPinch === 'left' ? 0.35 : 0.26) && dIndex < dMiddle * 0.85;
-
-    const isLeft = isMiddleLeft || isIndexLeftCompat;
-    const isRight = isPinkyRight;
-
-    // 4. Strict Gesture 1 (Pointing / Cursor Move):
-    //    Index is extended, Middle/Ring/Pinky curled in front, and NOT pinching
-    const isStrictGesture1 = index && !middle && !isLeft && !isRight;
-
-    if (isRight) {
-      mode = 'right';
-      pinch = 'right';
-    } else if (isLeft) {
-      mode = 'left';
-      pinch = 'left';
+    if (isFist) {
+      mode = 'idle';
+      pinch = null;
     } else if (isScrollGesture) {
       mode = 'scroll';
       pinch = null;
-    } else if (isStrictGesture1) {
-      mode = 'move';
-      pinch = null;
+    } else if (isLeft && isRight) {
+      mode = 'both';
+      pinch = 'both';
+    } else if (isLeft) {
+      mode = 'left';
+      pinch = 'left';
+    } else if (isRight) {
+      mode = 'right';
+      pinch = 'right';
     } else {
-      // 0 (Fist), 3, 4, 5 (Open Palm), or any other shape -> 100% IDLE (Rest)!
-      mode = 'idle';
+      mode = 'move';
       pinch = null;
     }
 
     if (mode === 'scroll') {
-      // Touch anchor is midpoint between index and middle tips
       anchor = {
         x: (points[8].x + points[12].x) * 0.5,
         y: (points[8].y + points[12].y) * 0.5,
       };
     } else {
-      // Move, Left Drag, and Right Click: cursor follows Index Fingertip (LM 8) directly!
       anchor = {
         x: points[8].x,
         y: points[8].y,
@@ -162,7 +143,6 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   }
 
   // Deadzone-free compact active zone mapping coordinates (0 ~ 1 normalized across comfortable desk view)
-  // Mirror x so moving right in front of webcam moves right on monitor
   const mirroredX = 1.0 - (points[8].x);
   const activePos = {
     x: clamp((mirroredX - 0.28) / 0.44, 0, 1),
@@ -178,9 +158,11 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     wrist: {x: points[0].x, y: points[0].y},
   };
 
-  const unpinched = dIndex >= 0.44 && dMiddle >= 0.44;
+  const unpinched = pointerMode === 'index'
+    ? (pinch === null)
+    : (dIndex >= 0.44 && dMiddle >= 0.44);
 
-  return {mode, pinch, anchor, vScroll: isSmartphoneScroll, dIndex, dMiddle, dPinky, dTwoFinger, palm, fingertips, activePos, unpinched};
+  return {mode, pinch, anchor, vScroll: isSmartphoneScroll, dIndex, dMiddle, dRing, dPinky, dTwoFinger, palm, fingertips, activePos, unpinched};
 }
 
 /** Pure landmark-to-input controller. It never sends OS events or stores camera data. */
@@ -229,6 +211,7 @@ export class AirMouseController {
     this.filtered = null;
     this.remaining = {x:0,y:0};
     this.leftDown = false;
+    this.rightDown = false;
     this.armed = false;
     this.releaseSince = null;
     this.dragDisplacement = 0;
@@ -243,8 +226,12 @@ export class AirMouseController {
   }
 
   interrupt(phase, disarm = true) {
-    const events = this.leftDown ? [{type:'button', button:'left', down:false}, {type:'release'}] : [];
+    const events = [];
+    if (this.leftDown) events.push({type:'button', button:'left', down:false});
+    if (this.rightDown) events.push({type:'button', button:'right', down:false});
+    if (this.leftDown || this.rightDown) events.push({type:'release'});
     this.leftDown = false;
+    this.rightDown = false;
     this.mode = 'idle';
     this.candidate = null;
     this.candidateSince = null;
@@ -294,78 +281,108 @@ export class AirMouseController {
       : 0;
     this.lastDIndex = dIndex;
 
-    this.pinch = observed.pinch;
-    // Either a clear unpinched hand or holding the base move pose arms actions.
-    if (observed.unpinched || (this.mode === 'move' && !observed.pinch)) {
-      this.releaseSince ??= now;
-      if (now - this.releaseSince >= RELEASE_MS) this.armed = true;
-    } else this.releaseSince = null;
-
     const events = [];
-    if (this.leftDown) {
-      if (observed.mode !== 'left') {
-        // If fingers separated (dIndex >= 0.47), release immediately.
-        // If fingers are still touching (dIndex < 0.47), debounce for 4 frames to absorb tracking noise.
-        if (dIndex >= 0.47 || ++this.leftReleaseFrames >= 4) {
-          events.push({type:'button', button:'left', down:false});
-          this.leftDown = false;
-          this.armed = false;
-          this.releaseSince = observed.unpinched ? now : null;
+
+    if (this.pointerMode === 'index') {
+      // === ERGONOMIC INDEX MODE: Instant Independent Buttons & Double-Click Support ===
+      const wantLeft = (observed.mode === 'left' || observed.mode === 'both');
+      const wantRight = (observed.mode === 'right' || observed.mode === 'both');
+
+      if (wantLeft !== this.leftDown) {
+        this.leftDown = wantLeft;
+        events.push({type: 'button', button: 'left', down: wantLeft});
+        if (wantLeft) {
           this.dragDisplacement = 0;
           this.dragUnlocked = false;
+        }
+      }
+
+      if (wantRight !== this.rightDown) {
+        this.rightDown = wantRight;
+        events.push({type: 'button', button: 'right', down: wantRight});
+      }
+
+      this.mode = observed.mode;
+      this.pinch = observed.pinch;
+
+      if (this.mode === 'idle') {
+        const result = this.interrupt('ready', false);
+        result.events.unshift(...events);
+        return result;
+      }
+    } else {
+      // === LEGACY PALM MODE ===
+      this.pinch = observed.pinch;
+      if (observed.unpinched || (this.mode === 'move' && !observed.pinch)) {
+        this.releaseSince ??= now;
+        if (now - this.releaseSince >= RELEASE_MS) this.armed = true;
+      } else this.releaseSince = null;
+
+      if (this.leftDown) {
+        if (observed.mode !== 'left') {
+          if (dIndex >= 0.47 || ++this.leftReleaseFrames >= 4) {
+            events.push({type:'button', button:'left', down:false});
+            this.leftDown = false;
+            this.armed = false;
+            this.releaseSince = observed.unpinched ? now : null;
+            this.dragDisplacement = 0;
+            this.dragUnlocked = false;
+            this.leftReleaseFrames = 0;
+          }
+        } else {
           this.leftReleaseFrames = 0;
         }
-      } else {
-        this.leftReleaseFrames = 0;
       }
-    }
-    if (observed.mode === 'idle') {
-      const releaseSince = this.releaseSince;
-      const result = this.interrupt('ready', false);
-      // Keep the confirmed release timer while a valid resting hand is visible.
-      this.releaseSince = releaseSince;
-      result.events.unshift(...events);
-      return result;
-    }
+      if (observed.mode === 'idle') {
+        const releaseSince = this.releaseSince;
+        const result = this.interrupt('ready', false);
+        this.releaseSince = releaseSince;
+        result.events.unshift(...events);
+        return result;
+      }
 
-    if (observed.pinch && !this.armed && this.mode !== observed.mode) {
-      const result = this.interrupt('release-required', false);
-      result.events.unshift(...events);
-      return result;
-    }
-    if (this.candidate !== observed.mode) {
-      // A deliberate action already confirmed this hand. Release back to the base
-      // pose without another dwell, but discard motion during the pose transition.
-      const recoveringMove = observed.mode === 'move' && ['left','right','scroll'].includes(this.mode);
-      this.mode = recoveringMove ? 'move' : 'idle';
-      this.candidate = observed.mode;
-      this.candidateSince = now;
-      this.observations = recoveringMove ? MIN_OBSERVATIONS : 1;
-      this.anchor = this.filtered = observed.anchor;
-      this.remaining = {x:0,y:0};
-      this.dragDisplacement = 0;
-      this.dragUnlocked = false;
-      return this.state(recoveringMove ? 'active' : 'holding', events, recoveringMove ? 1 : 0);
-    }
-    this.observations++;
-    if (this.mode !== observed.mode) {
-      const progress = this.holdMs === 0 ? 1 : (now - this.candidateSince) / this.holdMs;
-      this.anchor = this.filtered = observed.anchor;
-      if (progress < 1 || this.observations < MIN_OBSERVATIONS) return this.state('holding', events, progress);
-      this.mode = observed.mode;
-      if (this.mode === 'left') {
-        events.push({type:'button', button:'left', down:true});
-        this.leftDown = true;
-        this.armed = false;
+      if (observed.pinch && !this.armed && this.mode !== observed.mode) {
+        const result = this.interrupt('release-required', false);
+        result.events.unshift(...events);
+        return result;
+      }
+      if (this.candidate !== observed.mode) {
+        const recoveringMove = observed.mode === 'move' && ['left','right','scroll'].includes(this.mode);
+        this.mode = recoveringMove ? 'move' : 'idle';
+        this.candidate = observed.mode;
+        this.candidateSince = now;
+        this.observations = recoveringMove ? MIN_OBSERVATIONS : 1;
+        this.anchor = this.filtered = observed.anchor;
+        this.remaining = {x:0,y:0};
         this.dragDisplacement = 0;
         this.dragUnlocked = false;
-      } else if (this.mode === 'right') {
-        events.push({type:'button', button:'right', down:true}, {type:'button', button:'right', down:false});
-        this.armed = false;
+        return this.state(recoveringMove ? 'active' : 'holding', events, recoveringMove ? 1 : 0);
       }
+      this.observations++;
+      if (this.mode !== observed.mode) {
+        const progress = this.holdMs === 0 ? 1 : (now - this.candidateSince) / this.holdMs;
+        this.anchor = this.filtered = observed.anchor;
+        if (progress < 1 || this.observations < MIN_OBSERVATIONS) return this.state('holding', events, progress);
+        this.mode = observed.mode;
+        if (this.mode === 'left') {
+          events.push({type:'button', button:'left', down:true});
+          this.leftDown = true;
+          this.armed = false;
+          this.dragDisplacement = 0;
+          this.dragUnlocked = false;
+        } else if (this.mode === 'right') {
+          events.push({type:'button', button:'right', down:true}, {type:'button', button:'right', down:false});
+          this.armed = false;
+        }
+        return this.state('active', events, 1);
+      }
+    }
+
+    if (!this.anchor || !this.filtered) {
+      this.anchor = this.filtered = observed.anchor;
       return this.state('active', events, 1);
     }
-    // Right pinch sends its one click on entry, then keeps ordinary palm movement.
+
     const delta = {x:observed.anchor.x - this.anchor.x, y:observed.anchor.y - this.anchor.y};
     this.anchor = observed.anchor;
     if (Math.hypot(delta.x, delta.y) > 0.14) {
@@ -373,9 +390,27 @@ export class AirMouseController {
       result.events.unshift(...events);
       return result;
     }
+
+    // Adaptive Tremor & Jitter Filter for Index Fingertip
+    let alpha = this.smoothing;
+    if (this.pointerMode === 'index') {
+      const dist = Math.hypot(observed.anchor.x - this.filtered.x, observed.anchor.y - this.filtered.y);
+      if (dist < 0.003) {
+        // Stationary hovering / micro-tremor: apply heavy smoothing to eliminate jitter
+        alpha = Math.min(this.smoothing * 0.35, 0.16);
+      } else if (dist < 0.012) {
+        // Transition zone
+        const t = (dist - 0.003) / (0.012 - 0.003);
+        alpha = Math.min(this.smoothing * 0.35, 0.16) + t * (this.smoothing - Math.min(this.smoothing * 0.35, 0.16));
+      } else {
+        // Fast intentional sweep: snappy zero lag
+        alpha = Math.max(this.smoothing, 0.65);
+      }
+    }
+
     const next = {
-      x:this.filtered.x + (observed.anchor.x - this.filtered.x) * this.smoothing,
-      y:this.filtered.y + (observed.anchor.y - this.filtered.y) * this.smoothing,
+      x:this.filtered.x + (observed.anchor.x - this.filtered.x) * alpha,
+      y:this.filtered.y + (observed.anchor.y - this.filtered.y) * alpha,
     };
     let rawDx = -(next.x - this.filtered.x) * this.sensitivity;
     let rawDy = (next.y - this.filtered.y) * this.sensitivity;
@@ -383,6 +418,11 @@ export class AirMouseController {
       // Gain scaling: maps the comfortable chest/desk active box (~0.44 span) across full screen
       rawDx *= 2.0;
       rawDy *= 2.0;
+      // Sub-pixel deadband to stop 1px sensor twitch
+      if (Math.hypot(rawDx, rawDy) < 0.65) {
+        rawDx = 0;
+        rawDy = 0;
+      }
     }
     this.filtered = next;
 
@@ -415,17 +455,11 @@ export class AirMouseController {
       dy *= gain;
     }
 
-    // Pre-Pinch Velocity Dampening & Zero Click-Dip Freeze
+    // Click Jitter Lock: lock micro-displacement immediately following click
     if (this.pointerMode === 'index') {
-      if (this.mode === 'move' && !this.leftDown) {
-        if (dIndex < 0.48) {
-          // Finger is closing toward thumb to click: freeze cursor on target!
-          dx = 0;
-          dy = 0;
-        }
-      } else if (this.mode === 'left' && !this.dragUnlocked) {
+      if (this.leftDown && !this.dragUnlocked) {
         this.dragDisplacement += Math.hypot(dx, dy);
-        if (this.dragDisplacement < 16) {
+        if (this.dragDisplacement < 14) {
           dx = 0;
           dy = 0;
         } else {
@@ -434,11 +468,9 @@ export class AirMouseController {
       }
     } else if (this.clickLock && this.mode === 'move' && !this.leftDown) {
       if (dIndex < 0.48 && indexVelocity < -0.008) {
-        // Finger is closing rapidly toward thumb to click: freeze cursor on target!
         dx *= 0.05;
         dy *= 0.05;
       } else if (dIndex < 0.40 || (observed.dMiddle && observed.dMiddle < 0.42)) {
-        // Near pinch threshold: damp micro-tremors
         dx *= 0.25;
         dy *= 0.25;
       }
@@ -447,8 +479,6 @@ export class AirMouseController {
     if (this.mode === 'scroll') {
       if (this.pointerMode === 'index') {
         // === Smartphone Touch Swipe Scroll ===
-        // Moving 2 fingers UP (observed.anchor.y decreases) scrolls DOWN (positive wheel).
-        // Moving 2 fingers DOWN (observed.anchor.y increases) scrolls UP (negative wheel).
         if (this.lastTouchY === null) {
           this.lastTouchY = observed.anchor.y;
         }
@@ -470,7 +500,6 @@ export class AirMouseController {
         }
         const offsetY = observed.anchor.y - this.scrollOriginY;
         let scrollInput = dy * 2;
-        // Joystick continuous rate control when tilted beyond 0.008 deadzone
         if (Math.abs(offsetY) > 0.008) {
           const rate = Math.sign(offsetY) * Math.min(18, Math.pow((Math.abs(offsetY) - 0.008) * 140, 1.25) * 4);
           scrollInput += rate;
@@ -485,7 +514,6 @@ export class AirMouseController {
     } else {
       this.scrollOriginY = null;
       this.lastTouchY = null;
-      // Click Jitter Lock: lock micro-displacement immediately following left-click down (legacy palm mode)
       if (this.clickLock && this.mode === 'left' && this.leftDown && !this.dragUnlocked && this.pointerMode !== 'index') {
         this.dragDisplacement += Math.hypot(dx, dy);
         if (this.dragDisplacement < 10) {
@@ -511,6 +539,8 @@ export class AirMouseController {
       activePos: observed.activePos,
       dIndex: observed.dIndex,
       dMiddle: observed.dMiddle,
+      dRing: observed.dRing,
+      dPinky: observed.dPinky,
       dTwoFinger: observed.dTwoFinger
     });
   }

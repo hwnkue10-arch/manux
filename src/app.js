@@ -305,16 +305,18 @@ function drawHands(landmarks) {
     }
     for (const point of hand) { ctx.beginPath(); ctx.arc(point.x * width, point.y * height, Math.max(2, width / 350), 0, Math.PI * 2); ctx.fill(); }
     if (controlMode === 'mouse') {
-      const p4 = hand[4], p8 = hand[8], p12 = hand[12], p20 = hand[20];
+      const p4 = hand[4], p8 = hand[8], p12 = hand[12], p16 = hand[16];
       const dMiddle = Math.hypot(p4.x - p12.x, (p4.y - p12.y) * height / width);
-      const dPinky = p20 ? Math.hypot(p4.x - p20.x, (p4.y - p20.y) * height / width) : 1;
+      const dRing = p16 ? Math.hypot(p4.x - p16.x, (p4.y - p16.y) * height / width) : 1;
       if (dMiddle < 0.08) {
         ctx.strokeStyle = '#22c55e'; ctx.lineWidth = Math.max(4, width / 160);
         ctx.beginPath(); ctx.moveTo(p4.x * width, p4.y * height); ctx.lineTo(p12.x * width, p12.y * height); ctx.stroke();
-      } else if (dPinky < 0.08) {
+      }
+      if (dRing < 0.08) {
         ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = Math.max(4, width / 160);
-        ctx.beginPath(); ctx.moveTo(p4.x * width, p4.y * height); ctx.lineTo(p20.x * width, p20.y * height); ctx.stroke();
-      } else if (Math.hypot(p8.x - p12.x, (p8.y - p12.y) * height / width) < 0.08) {
+        ctx.beginPath(); ctx.moveTo(p4.x * width, p4.y * height); ctx.lineTo(p16.x * width, p16.y * height); ctx.stroke();
+      }
+      if (Math.hypot(p8.x - p12.x, (p8.y - p12.y) * height / width) < 0.08) {
         ctx.strokeStyle = '#a855f7'; ctx.lineWidth = Math.max(4, width / 160);
         ctx.beginPath(); ctx.moveTo(p8.x * width, p8.y * height); ctx.lineTo(p12.x * width, p12.y * height); ctx.stroke();
       }

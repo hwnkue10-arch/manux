@@ -347,7 +347,7 @@ test('pre-pinch velocity dampening suppresses cursor drift while fingers are clo
 
 test('pointerMode: index tracks index finger tip directly and reports fingertip HUD data', () => {
   const s = session({pointerMode:'index', smoothing:1});
-  // Gesture 1: single extended index
+  // Pointing index
   const r1 = s.hold('index');
   assert.ok(r1[0].fingertips?.index);
   assert.ok(r1[0].fingertips?.thumb);
@@ -356,15 +356,17 @@ test('pointerMode: index tracks index finger tip directly and reports fingertip 
   assert.ok(r1[0].activePos.x >= 0 && r1[0].activePos.x <= 1);
   assert.ok(r1[0].activePos.y >= 0 && r1[0].activePos.y <= 1);
 
-  // Moving index tip in Gesture 1 moves cursor
+  // Moving index tip in pointing pose moves cursor
   const h2 = hand('index', {x: 0.02, y: 0.01});
   const r2 = s.feed('index', {}, {landmarks: h2});
   assert.equal(r2.mode, 'move');
   assert.ok(r2.events.some(e => e.type === 'move'));
 
-  // Strict Gesture 1: Open palm (all fingers extended) or Fist MUST BE IDLE (Rest)
+  // Gesture-free cursor tracking: open/relaxed palm continues to track index tip
   const openResult = s.feed('move', {x: 0.02});
-  assert.equal(openResult.mode, 'idle', 'Open palm (5 fingers) must be idle/rest');
+  assert.equal(openResult.mode, 'move', 'Open/relaxed palm must track index tip');
+
+  // Only Fist (주먹) stops tracking and enters idle (rest)
   const fistResult = s.feed('fist', {x: 0.02});
   assert.equal(fistResult.mode, 'idle', 'Fist must be idle/rest');
 });
@@ -373,20 +375,20 @@ test('pointerMode: index left pinch holds left button continuously for reliable 
   const s = session({pointerMode:'index', smoothing:1});
   s.hold('index');
 
-  // Pinch index and thumb
-  const pinchStates = s.hold('left');
+  // Pinch thumb and middle (index-left)
+  const pinchStates = s.hold('index-left');
   const p1 = pinchStates.at(-1);
   assert.equal(p1.mode, 'left');
   assert.ok(pinchStates.flatMap(s => s.events).some(e => e.type === 'button' && e.button === 'left' && e.down));
 
-  // Small displacement under 16px has zero click-dip (dx=0, dy=0)
-  const smallMove = hand('left', {x: -0.002, y: 0.001});
-  const pSmall = s.feed('left', {}, {landmarks: smallMove});
+  // Small displacement under 14px has zero click-dip (dx=0, dy=0)
+  const smallMove = hand('index-left', {x: -0.002, y: 0.001});
+  const pSmall = s.feed('index-left', {}, {landmarks: smallMove});
   assert.equal(pSmall.events.filter(e => e.type === 'move').length, 0, 'Click-dip must be suppressed');
 
   // Intentional larger hand movement drags smoothly
-  const dragMove = hand('left', {x: -0.05, y: 0.02});
-  const pDrag = s.feed('left', {}, {landmarks: dragMove});
+  const dragMove = hand('index-left', {x: -0.05, y: 0.02});
+  const pDrag = s.feed('index-left', {}, {landmarks: dragMove});
   assert.equal(pDrag.mode, 'left');
   assert.ok(pDrag.events.some(e => e.type === 'move'));
   // Left button MUST NOT be released or pressed again during drag
@@ -398,9 +400,9 @@ test('pointerMode: index left pinch holds left button continuously for reliable 
   assert.ok(pRelease.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
 });
 
-test('pointerMode: index right click triggers on Thumb + Pinky touch and never in Gesture 1 or Fist', () => {
+test('pointerMode: index right click triggers on Thumb + Ring touch and never in Fist', () => {
   const s = session({pointerMode:'index', smoothing:1});
-  // Gesture 1 (pointing with middle finger curled in palm)
+  // Pointing index
   const g1 = s.hold('index');
   assert.equal(g1.at(-1).mode, 'move');
   assert.equal(g1.at(-1).pinch, null);
@@ -410,10 +412,14 @@ test('pointerMode: index right click triggers on Thumb + Pinky touch and never i
   assert.equal(fist.at(-1).mode, 'idle');
   assert.equal(fist.flatMap(s => s.events).filter(e => e.type === 'button').length, 0);
 
-  // Thumb + Pinky touch triggers Right Click
+  // Thumb + Ring touch triggers Right Click
   const rightStates = s.hold('index-right');
   assert.equal(rightStates.at(-1).mode, 'right');
   assert.ok(rightStates.flatMap(s => s.events).some(e => e.type === 'button' && e.button === 'right' && e.down));
+
+  // Releasing Thumb + Ring touch releases Right Click
+  const releaseState = s.feed('index');
+  assert.ok(releaseState.events.some(e => e.type === 'button' && e.button === 'right' && !e.down));
 });
 
 test('pointerMode: index smartphone touch swipe scrolls down when swiping up, and fist lifts touch', () => {
@@ -422,15 +428,16 @@ test('pointerMode: index smartphone touch swipe scrolls down when swiping up, an
 
   const makeV = (transform = {}) => {
     const h = hand('move', transform);
-    h[16].y = h[14].y + 0.05;
-    h[20].y = h[18].y + 0.05;
+    h[16].y = h[14].y + 0.05; // ring curled
+    h[20].y = h[18].y + 0.05; // pinky curled
     return h;
   };
 
-  // Touch Down in peace gesture (2 fingers extended)
+  // Touch Down in peace gesture (2 fingers extended): V-sign takes precedence over right click
   for (let i = 0; i < 4; i++) s.feed('move', {}, {landmarks: makeV()});
   const touchDown = s.feed('move', {}, {landmarks: makeV()});
-  assert.equal(touchDown.mode, 'scroll');
+  assert.equal(touchDown.mode, 'scroll', 'V-sign must activate scroll, never false right click');
+  assert.equal(touchDown.events.filter(e => e.type === 'button').length, 0);
 
   // Swipe UP (Y decreases: y: -0.03) -> page scrolls DOWN (positive scroll dy)
   const swipeUp = s.feed('move', {}, {landmarks: makeV({y: -0.03})});
@@ -450,34 +457,42 @@ test('pointerMode: index smartphone touch swipe scrolls down when swiping up, an
   assert.equal(fistDown.events.filter(e => e.type === 'scroll').length, 0);
 });
 
-test('pointerMode: index Thumb+Middle clicks left, Thumb+Pinky clicks right, Fist is strictly idle with zero click', () => {
+test('pointerMode: index rapid double-click, independent Left and Right, Fist is strictly idle with zero click', () => {
   const s = session({pointerMode:'index', smoothing:1});
   s.hold('index');
 
-  // 1. Gesture 1 (Pointing): move mode, no pinch
-  const moveStates = s.hold('index');
-  assert.equal(moveStates.at(-1).mode, 'move');
-  assert.equal(moveStates.at(-1).pinch, null);
+  // 1. Rapid double-click verification: two rapid taps fire 2 down and 2 up events without dwell lockout
+  const tap1Down = s.feed('index-left');
+  assert.ok(tap1Down.events.some(e => e.type === 'button' && e.button === 'left' && e.down));
+  const tap1Up = s.feed('index');
+  assert.ok(tap1Up.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
 
-  // 2. Thumb + Middle touch: Left Click & Drag
-  const leftStates = s.hold('index-left');
-  assert.equal(leftStates.at(-1).mode, 'left');
-  assert.ok(leftStates.flatMap(s => s.events).some(e => e.type === 'button' && e.button === 'left' && e.down));
+  const tap2Down = s.feed('index-left');
+  assert.ok(tap2Down.events.some(e => e.type === 'button' && e.button === 'left' && e.down), 'Double-click 2nd tap must fire immediately');
+  const tap2Up = s.feed('index');
+  assert.ok(tap2Up.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
 
-  // Release left pinch back to pointing
-  s.hold('index');
+  // 2. Simultaneous Left + Right Click: when both Middle and Ring touch Thumb, BOTH buttons are down
+  const bothState = s.feed('index-both');
+  assert.equal(bothState.mode, 'both');
+  assert.ok(bothState.events.some(e => e.type === 'button' && e.button === 'left' && e.down));
+  assert.ok(bothState.events.some(e => e.type === 'button' && e.button === 'right' && e.down));
 
-  // 3. Thumb + Pinky touch: Right Click
-  const rightStates = s.hold('index-right');
-  assert.equal(rightStates.at(-1).mode, 'right');
-  assert.ok(rightStates.flatMap(s => s.events).some(e => e.type === 'button' && e.button === 'right' && e.down));
+  // Releasing Ring only releases right, left remains down
+  const leftRemain = s.feed('index-left');
+  assert.ok(leftRemain.events.some(e => e.type === 'button' && e.button === 'right' && !e.down));
+  assert.ok(!leftRemain.events.some(e => e.type === 'button' && e.button === 'left'));
 
-  // 4. Clenched Fist: even with thumb touching curled fingers, it MUST BE IDLE and NEVER click!
+  // Releasing Middle releases left
+  const allRelease = s.feed('index');
+  assert.ok(allRelease.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
+
+  // 3. Clenched Fist: even with thumb touching curled fingers, it MUST BE IDLE and NEVER click!
   const fistStates = s.hold('fist');
   assert.equal(fistStates.at(-1).mode, 'idle');
   assert.equal(fistStates.flatMap(s => s.events).filter(e => e.type === 'button').length, 0);
 
-  // 5. Active Pos Mapping: moving index in comfortable center zone (0.28 to 0.72) spans 0 to 1
+  // 4. Active Pos Mapping: moving index in comfortable center zone (0.28 to 0.72) spans 0 to 1
   const hLeft = hand('index'); hLeft[8] = {x: 0.72, y: 0.20, z: 0}; // mirroredX = 0.28 -> activePos.x = 0
   const rLeft = s.feed('index', {}, {landmarks: hLeft});
   assert.equal(rLeft.activePos.x, 0);
