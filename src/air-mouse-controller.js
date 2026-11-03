@@ -1,5 +1,6 @@
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+const dist2D = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const MAX_GAP_MS = 250;
 const RELEASE_MS = 120;
 const MIN_OBSERVATIONS = 3;
@@ -19,33 +20,53 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
       (p.z === undefined || (Number.isFinite(p.z) && Math.abs(p.z) <= 3)))) return null;
   // MediaPipe's z uses approximately the same scale as x. All axes below use video-width units.
   const points = landmarks.map(p => ({x:p.x, y:p.y * height / width, z:p.z ?? 0}));
-  const palm = Math.max(distance(points[0], points[9]), distance(points[5], points[17]));
+  const palm = Math.max(dist2D(points[0], points[9]), dist2D(points[5], points[17]));
   if (palm < 0.025 || palm > 0.8) return null;
   const extended = base => straight(points[base], points[base + 1], points[base + 3]) &&
-    distance(points[base + 3], points[0]) > distance(points[base + 1], points[0]) * 1.12;
+    dist2D(points[base + 3], points[0]) > dist2D(points[base + 1], points[0]) * 1.12;
   const index = extended(5), middle = extended(9), ring = extended(13), pinky = extended(17);
   const fingerExtensions = new Map([[5,index],[9,middle],[13,ring],[17,pinky]]);
-  const ratio = tip => distance(points[4], points[tip]) / palm;
-  const isFist = [8, 12, 16, 20].every(tip => distance(points[tip], points[0]) < palm * 1.05);
+  const ratio = tip => dist2D(points[4], points[tip]) / palm;
+  const dIndex = ratio(8);
+  const dMiddle = ratio(12);
+  const dRing = ratio(16);
+  const dTwoFinger = dist2D(points[8], points[12]) / palm;
+
+  const isFist = [8, 12, 16, 20].every(tip => dist2D(points[tip], points[0]) < palm * 1.05);
   // Reachable pinch tips must extend away from the wrist, and thumb must extend from wrist
   const reachable = (tip, base) => !isFist &&
-    distance(points[tip], points[0]) > palm * 1.0 &&
-    distance(points[tip], points[base]) > palm * 0.35 &&
-    distance(points[4], points[0]) > palm * 0.65;
+    dist2D(points[tip], points[0]) > palm * 1.0 &&
+    dist2D(points[tip], points[base]) > palm * 0.35 &&
+    dist2D(points[4], points[0]) > palm * 0.65;
+
+  // Exclusive left and right pinch detection (prevents index dipping during middle pinch)
+  const isLeftPinch = reachable(8, 5) && dIndex < (previousPinch === 'left' ? 0.46 : 0.35) && dMiddle > dIndex * 1.15;
+  const isRightPinch = reachable(12, 9) && dMiddle < (previousPinch === 'right' ? 0.46 : 0.38) && dIndex > dMiddle * 1.18;
+  const isScrollPinch = reachable(16, 13) && dRing < (previousPinch === 'scroll' ? 0.46 : 0.35);
+
   const fingers = [
-    {mode:'left', tip:8, base:5, entry:0.35},
-    {mode:'right', tip:12, base:9, entry:0.38},
-    {mode:'scroll', tip:16, base:13, entry:0.35},
-  ].map(f => ({...f, ratio:ratio(f.tip), reachable:reachable(f.tip, f.base)}));
-  const pinches = fingers.filter(f => f.reachable && f.ratio < (previousPinch === f.mode ? 0.46 : f.entry));
+    {mode:'left', tip:8, base:5, pinch:isLeftPinch, ratio:dIndex, reachable:reachable(8, 5)},
+    {mode:'right', tip:12, base:9, pinch:isRightPinch, ratio:dMiddle, reachable:reachable(12, 9)},
+    {mode:'scroll', tip:16, base:13, pinch:isScrollPinch, ratio:dRing, reachable:reachable(16, 13)},
+  ];
+  const pinches = fingers.filter(f => f.pinch);
   const ambiguous = pinches.length > 1 || (pinches.length === 1 && fingers.some(f =>
     f.mode !== pinches[0].mode && f.reachable && f.ratio < 0.42));
   const pinch = ambiguous ? null : pinches[0]?.mode ?? null;
-  // Ergonomic V-sign scroll: index and middle extended, ring and pinky folded (when enabled)
-  const vScroll = allowVScroll && !ambiguous && !pinch && index && middle && !ring && !pinky;
+
+  // Two-Finger Clutch scroll (LM 8 & LM 12 touching, thumb unpinched) OR classic V-sign scroll
+  const twoFingerClutch = allowVScroll && !ambiguous && !pinch && dIndex > 0.42 && dMiddle > 0.42 && dTwoFinger < 0.22;
+  const vScroll = allowVScroll && !ambiguous && !pinch && ((index && middle && !ring && !pinky) || twoFingerClutch);
+
   const mode = ambiguous ? 'idle' : pinch || (vScroll ? 'scroll' : ([index,middle,ring,pinky].filter(Boolean).length >= 3 ? 'move' : 'idle'));
-  const anchor = [0,5,9,13,17].reduce((p, i) => ({x:p.x + points[i].x / 5, y:p.y + points[i].y / 5}), {x:0,y:0});
-  return {mode, pinch, anchor, vScroll, unpinched:!ambiguous && fingers.every(f => !f.reachable || f.ratio >= 0.44)};
+
+  // Rigid Palm Anchor: Wrist (0) 20%, Index MCP (5) 50%, Middle MCP (9) 30%
+  const anchor = {
+    x: 0.2 * points[0].x + 0.5 * points[5].x + 0.3 * points[9].x,
+    y: 0.2 * points[0].y + 0.5 * points[5].y + 0.3 * points[9].y,
+  };
+
+  return {mode, pinch, anchor, vScroll, dIndex, dMiddle, unpinched:!ambiguous && fingers.every(f => !f.reachable || f.ratio >= 0.44)};
 }
 
 /** Pure landmark-to-input controller. It never sends OS events or stores camera data. */
@@ -86,6 +107,7 @@ export class AirMouseController {
     this.releaseSince = null;
     this.dragDisplacement = 0;
     this.dragUnlocked = false;
+    this.lastDIndex = null;
     return this.state('disabled', [{type:'release'}]);
   }
 
@@ -102,6 +124,7 @@ export class AirMouseController {
     this.releaseSince = null;
     this.dragDisplacement = 0;
     this.dragUnlocked = false;
+    this.lastDIndex = null;
     if (disarm) this.armed = false;
     return this.state(phase, events);
   }
@@ -124,6 +147,12 @@ export class AirMouseController {
     const changedHand = handedness && this.lastHand && handedness !== this.lastHand;
     this.lastHand = handedness;
     if (gap || changedHand) return this.interrupt('tracking-reset');
+
+    const dIndex = observed.dIndex ?? 1.0;
+    const indexVelocity = (this.lastDIndex !== null && Number.isFinite(now) && !gap)
+      ? (dIndex - this.lastDIndex)
+      : 0;
+    this.lastDIndex = dIndex;
 
     this.pinch = observed.pinch;
     // Either a clear unpinched hand or holding the base move pose arms actions.
@@ -214,6 +243,19 @@ export class AirMouseController {
       }
       dx *= gain;
       dy *= gain;
+    }
+
+    // Pre-Pinch Velocity Dampening (Click Dip Elimination)
+    if (this.clickLock && this.mode === 'move') {
+      if (dIndex < 0.48 && indexVelocity < -0.008) {
+        // Finger is closing rapidly toward thumb to click: freeze cursor on target!
+        dx *= 0.05;
+        dy *= 0.05;
+      } else if (dIndex < 0.40 || (observed.dMiddle && observed.dMiddle < 0.42)) {
+        // Near pinch threshold: damp micro-tremors
+        dx *= 0.25;
+        dy *= 0.25;
+      }
     }
 
     if (this.mode === 'scroll') {

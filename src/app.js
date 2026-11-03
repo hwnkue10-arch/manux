@@ -314,6 +314,9 @@ function drawHands(landmarks) {
       } else if (d12 < 0.13) {
         ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = Math.max(4, width / 160);
         ctx.beginPath(); ctx.moveTo(p4.x * width, p4.y * height); ctx.lineTo(p12.x * width, p12.y * height); ctx.stroke();
+      } else if (Math.hypot(p8.x - p12.x, (p8.y - p12.y) * height / width) < 0.08) {
+        ctx.strokeStyle = '#a855f7'; ctx.lineWidth = Math.max(4, width / 160);
+        ctx.beginPath(); ctx.moveTo(p8.x * width, p8.y * height); ctx.lineTo(p12.x * width, p12.y * height); ctx.stroke();
       }
     }
   }

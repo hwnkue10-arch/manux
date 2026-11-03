@@ -306,3 +306,41 @@ test('opt-in V-sign (peace) gesture triggers smooth scroll without thumb pinch',
   const scrolled = s.feed('move', {}, {landmarks: makeV({y: 0.03})});
   assert.ok(scrolled.events.some(e => e.type === 'scroll'));
 });
+
+test('two-finger clutch (index and middle touching) triggers smooth scroll', () => {
+  const s = session({vScroll:true, smoothing:1});
+  s.hold('move');
+  const makeClutch = (transform = {}) => {
+    const h = hand('move', transform);
+    // Bring index tip (8) close to middle tip (12)
+    h[8] = {x: 0.485, y: 0.355, z: 0};
+    h[12] = {x: 0.50, y: 0.35, z: 0};
+    return h;
+  };
+
+  for (let i = 0; i < 4; i++) s.feed('move', {}, {landmarks: makeClutch()});
+  const state = s.feed('move', {}, {landmarks: makeClutch()});
+  assert.equal(state.mode, 'scroll');
+
+  const scrolled = s.feed('move', {}, {landmarks: makeClutch({y: 0.03})});
+  assert.ok(scrolled.events.some(e => e.type === 'scroll'));
+});
+
+test('pre-pinch velocity dampening suppresses cursor drift while fingers are closing', () => {
+  const s = session({clickLock:true, smoothing:1});
+  s.hold('move');
+
+  // Step 1: hand in move mode, index tip at normal open position
+  const h1 = hand('move');
+  s.feed('move', {}, {landmarks: h1});
+
+  // Step 2: hand moves by x: 0.02, but index finger is rapidly closing towards thumb (dIndex dropping)
+  const h2 = hand('move', {x: 0.02});
+  // move index tip (8) close to thumb (4), but not yet at pinch threshold
+  h2[8] = {x: h2[4].x + 0.09, y: h2[4].y, z: 0}; // dIndex ~ 0.39, dropping rapidly
+  const damped = s.feed('move', {}, {landmarks: h2});
+
+  // The move displacement should be heavily damped (< 10px instead of normal ~36px)
+  const dx = damped.events.find(e => e.type === 'move')?.dx ?? 0;
+  assert.ok(Math.abs(dx) < 10, `Expected damped dx < 10, got ${dx}`);
+});
