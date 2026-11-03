@@ -11,7 +11,7 @@ function straight(a, b, c) {
   return length > 1e-8 && (u.x * v.x + u.y * v.y + u.z * v.z) / length < -0.82;
 }
 
-function observation(landmarks, width, height, previousPinch) {
+function observation(landmarks, width, height, previousPinch, allowVScroll = false) {
   if (!Array.isArray(landmarks) || landmarks.length !== 21 || !Number.isFinite(width) ||
       !Number.isFinite(height) || width <= 0 || height <= 0) return null;
   if (!landmarks.every(p => p && Number.isFinite(p.x) && Number.isFinite(p.y) &&
@@ -39,14 +39,16 @@ function observation(landmarks, width, height, previousPinch) {
   const ambiguous = pinches.length > 1 || (pinches.length === 1 && fingers.some(f =>
     f.mode !== pinches[0].mode && f.reachable && f.ratio < 0.4));
   const pinch = ambiguous ? null : pinches[0]?.mode ?? null;
-  const mode = ambiguous ? 'idle' : pinch || ([index,middle,ring,pinky].filter(Boolean).length >= 3 ? 'move' : 'idle');
+  // Ergonomic V-sign scroll: index and middle extended, ring and pinky folded (when enabled)
+  const vScroll = allowVScroll && !ambiguous && !pinch && index && middle && !ring && !pinky;
+  const mode = ambiguous ? 'idle' : pinch || (vScroll ? 'scroll' : ([index,middle,ring,pinky].filter(Boolean).length >= 3 ? 'move' : 'idle'));
   const anchor = [0,5,9,13,17].reduce((p, i) => ({x:p.x + points[i].x / 5, y:p.y + points[i].y / 5}), {x:0,y:0});
-  return {mode, pinch, anchor, unpinched:!ambiguous && fingers.every(f => !f.reachable || f.ratio >= 0.42)};
+  return {mode, pinch, anchor, vScroll, unpinched:!ambiguous && fingers.every(f => !f.reachable || f.ratio >= 0.42)};
 }
 
 /** Pure landmark-to-input controller. It never sends OS events or stores camera data. */
 export class AirMouseController {
-  constructor({sensitivity = 1800, smoothing = 0.45, holdMs = 160} = {}) {
+  constructor({sensitivity = 1800, smoothing = 0.45, holdMs = 160, ballistics = false, clickLock = false, vScroll = false} = {}) {
     if (!Number.isFinite(sensitivity) || sensitivity < 100 || sensitivity > 6000 ||
         !Number.isFinite(smoothing) || smoothing <= 0 || smoothing > 1 ||
         !Number.isFinite(holdMs) || holdMs < 0 || holdMs > 2000) {
@@ -55,6 +57,9 @@ export class AirMouseController {
     this.sensitivity = sensitivity;
     this.smoothing = smoothing;
     this.holdMs = holdMs;
+    this.ballistics = Boolean(ballistics);
+    this.clickLock = Boolean(clickLock);
+    this.vScroll = Boolean(vScroll);
     this.reset();
   }
 
@@ -77,6 +82,8 @@ export class AirMouseController {
     this.leftDown = false;
     this.armed = false;
     this.releaseSince = null;
+    this.dragDisplacement = 0;
+    this.dragUnlocked = false;
     return this.state('disabled', [{type:'release'}]);
   }
 
@@ -91,6 +98,8 @@ export class AirMouseController {
     this.remaining = {x:0,y:0};
     this.pinch = null;
     this.releaseSince = null;
+    this.dragDisplacement = 0;
+    this.dragUnlocked = false;
     if (disarm) this.armed = false;
     return this.state(phase, events);
   }
@@ -105,7 +114,7 @@ export class AirMouseController {
     if (this.lastTime !== null && now <= this.lastTime) return this.state('stale');
     const gap = this.lastTime !== null && now - this.lastTime > MAX_GAP_MS;
     this.lastTime = now;
-    const observed = quality === true ? observation(landmarks, width, height, this.pinch) : null;
+    const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll) : null;
     if (!observed) {
       this.lastHand = null;
       return this.interrupt('invalid');
@@ -127,6 +136,8 @@ export class AirMouseController {
       this.leftDown = false;
       this.armed = false;
       this.releaseSince = observed.unpinched ? now : null;
+      this.dragDisplacement = 0;
+      this.dragUnlocked = false;
     }
     if (observed.mode === 'idle') {
       const releaseSince = this.releaseSince;
@@ -152,6 +163,8 @@ export class AirMouseController {
       this.observations = recoveringMove ? MIN_OBSERVATIONS : 1;
       this.anchor = this.filtered = observed.anchor;
       this.remaining = {x:0,y:0};
+      this.dragDisplacement = 0;
+      this.dragUnlocked = false;
       return this.state(recoveringMove ? 'active' : 'holding', events, recoveringMove ? 1 : 0);
     }
     this.observations++;
@@ -164,6 +177,8 @@ export class AirMouseController {
         events.push({type:'button', button:'left', down:true});
         this.leftDown = true;
         this.armed = false;
+        this.dragDisplacement = 0;
+        this.dragUnlocked = false;
       } else if (this.mode === 'right') {
         events.push({type:'button', button:'right', down:true}, {type:'button', button:'right', down:false});
         this.armed = false;
@@ -182,9 +197,23 @@ export class AirMouseController {
       x:this.filtered.x + (observed.anchor.x - this.filtered.x) * this.smoothing,
       y:this.filtered.y + (observed.anchor.y - this.filtered.y) * this.smoothing,
     };
-    const dx = -(next.x - this.filtered.x) * this.sensitivity;
-    const dy = (next.y - this.filtered.y) * this.sensitivity;
+    let dx = -(next.x - this.filtered.x) * this.sensitivity;
+    let dy = (next.y - this.filtered.y) * this.sensitivity;
     this.filtered = next;
+
+    // Ergonomic pointer ballistics
+    if (this.ballistics && this.mode !== 'scroll') {
+      const v = Math.hypot(dx, dy);
+      let gain = 1.0;
+      if (v < 2.5) {
+        gain = 0.55 + (v / 2.5) * 0.45; // Sub-pixel stabilization to dampen micro-tremors
+      } else if (v > 7.0) {
+        gain = 1.0 + Math.min(2.5, Math.pow((v - 7.0) / 8.0, 1.25)); // Acceleration for effortless traversal
+      }
+      dx *= gain;
+      dy *= gain;
+    }
+
     if (this.mode === 'scroll') {
       this.remaining.y += dy * 2;
       const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
@@ -193,6 +222,17 @@ export class AirMouseController {
         this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
       }
     } else {
+      // Click Jitter Lock: lock micro-displacement immediately following left-click down
+      if (this.clickLock && this.mode === 'left' && this.leftDown && !this.dragUnlocked) {
+        this.dragDisplacement += Math.hypot(dx, dy);
+        if (this.dragDisplacement < 10) {
+          dx = 0;
+          dy = 0;
+        } else {
+          this.dragUnlocked = true;
+        }
+      }
+
       this.remaining.x += dx;
       this.remaining.y += dy;
       const px = clamp(Math.trunc(this.remaining.x), -100, 100);

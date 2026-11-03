@@ -257,3 +257,52 @@ test('non-finite, incomplete, out-of-frame and degenerate landmarks cannot creat
   }
   assert.throws(()=>new AirMouseController({sensitivity:Infinity}),RangeError);
 });
+
+
+test('ergonomic pointer ballistics scales down micro-tremors and accelerates fast sweeps', () => {
+  const linear = session({ballistics:false, smoothing:1});
+  const accel = session({ballistics:true, smoothing:1});
+  linear.hold('move'); accel.hold('move');
+
+  // Micro-motion: dx is scaled down for sub-pixel precision
+  const linMicro = linear.feed('move', {x: 0.0008});
+  const accMicro = accel.feed('move', {x: 0.0008});
+  const linDx = linMicro.events[0]?.dx ?? 0;
+  const accDx = accMicro.events[0]?.dx ?? 0;
+  assert.ok(Math.abs(accDx) <= Math.abs(linDx));
+
+  // Fast sweep: dx is amplified for screen crossing
+  const linFast = linear.feed('move', {x: 0.02});
+  const accFast = accel.feed('move', {x: 0.02});
+  assert.ok(Math.abs(accFast.events[0].dx) > Math.abs(linFast.events[0].dx));
+});
+
+test('click lock suppresses tiny accidental motion during left-click until intentional drag', () => {
+  const s = session({clickLock:true, smoothing:1});
+  s.hold('move');
+  s.hold('left');
+  // Small jitter after clicking down (< 10px) is suppressed
+  const jitter = s.feed('left', {x: -0.002});
+  assert.equal(jitter.events.some(e => e.type === 'move'), false);
+  // Intentional drag (> 10px) unlocks motion
+  const drag = s.feed('left', {x: -0.02});
+  assert.ok(drag.events.some(e => e.type === 'move' && e.dx > 0));
+});
+
+test('opt-in V-sign (peace) gesture triggers smooth scroll without thumb pinch', () => {
+  const s = session({vScroll:true, smoothing:1});
+  s.hold('move');
+  const makeV = (transform = {}) => {
+    const v = hand('move', transform);
+    const folded = hand('fist', transform);
+    for (const i of [13,14,15,16, 17,18,19,20]) v[i] = folded[i];
+    return v;
+  };
+
+  for (let i = 0; i < 4; i++) s.feed('move', {}, {landmarks: makeV()});
+  const state = s.feed('move', {}, {landmarks: makeV()});
+  assert.equal(state.mode, 'scroll');
+
+  const scrolled = s.feed('move', {}, {landmarks: makeV({y: 0.03})});
+  assert.ok(scrolled.events.some(e => e.type === 'scroll'));
+});

@@ -27,17 +27,18 @@
         <div class="mouse-click-task"><button id="mouse-click-target" type="button">여기를 클릭</button><span>좌클릭 <strong id="mouse-click-count">0</strong>회</span></div>
         <div id="mouse-drag-zone" class="mouse-drag-zone" aria-hidden="true">이쪽으로 옮겨보세요</div>
         <div id="mouse-drag-target" class="mouse-drag-target" aria-label="드래그 연습 조각"><span aria-hidden="true">⠿</span><strong>잡고 이동</strong></div>
-        <div class="mouse-scroll-task"><div class="mouse-scroll-heading"><strong>스크롤 연습</strong><span id="mouse-scroll-value">0px</span></div><div id="mouse-scroll-area" class="mouse-scroll-area" tabindex="0" aria-label="스크롤 연습 문서"><p><b>01</b>손을 편하게 펴고 엄지와 약지를 붙이세요.</p><p><b>02</b>붙인 채 손 전체를 위아래로 움직이세요.</p><p><b>03</b>글이 움직이면 스크롤 성공입니다.</p><p><b>04</b>손을 멈추면 스크롤도 멈춥니다.</p><p><b>05</b>손가락을 접거나 주먹을 쥐면 입력을 쉽니다.</p><p><b>06</b>다시 손을 편하게 펴면 커서를 움직입니다.</p><p><b>07</b>반대 방향으로도 움직여보세요.</p><p><b>08</b>끝까지 내려왔습니다.</p></div></div>
+        <div class="mouse-scroll-task"><div class="mouse-scroll-heading"><strong>스크롤 연습</strong><span id="mouse-scroll-value">0px</span></div><div id="mouse-scroll-area" class="mouse-scroll-area" tabindex="0" aria-label="스크롤 연습 문서"><p><b>01</b>손목을 책상에 대고 편하게 펴세요.</p><p><b>02</b>V(가위) 제스처를 취하고 손을 위아래로 움직이세요.</p><p><b>03</b>글이 움직이면 스크롤 성공입니다.</p><p><b>04</b>손을 멈추면 스크롤도 멈춥니다.</p><p><b>05</b>손가락을 접거나 주먹을 쥐면 입력을 쉽니다.</p><p><b>06</b>다시 손을 편하게 펴면 커서를 움직입니다.</p><p><b>07</b>반대 방향으로도 움직여보세요.</p><p><b>08</b>끝까지 내려왔습니다.</p></div></div>
         <div id="mouse-context-menu" class="mouse-context-menu" role="status" hidden><strong>우클릭 성공</strong><span>엄지와 중지를 떼면 다시 사용할 수 있어요.</span></div>
         <div id="mouse-cursor" class="mouse-cursor" aria-hidden="true"><svg viewBox="0 0 28 36" width="28" height="36"><path d="M3 2L3 28L10 22L15 33L21 30L16 20L25 20Z" fill="currentColor" stroke="#112331" stroke-width="2" stroke-linejoin="round"/></svg></div>
       </div>
       <div class="mouse-control-row"><label class="control-toggle"><input id="mouse-enabled" type="checkbox" disabled><span>마우스 제어 켜기</span></label><label class="mouse-sensitivity" for="mouse-sensitivity">이동 감도 <output id="mouse-sensitivity-output" for="mouse-sensitivity">1800</output><input type="range" id="mouse-sensitivity" min="600" max="3600" step="100" value="1800"></label></div>
+      <div class="mouse-control-row" style="margin-top:10px"><label class="control-toggle"><input id="mouse-ballistics" type="checkbox" checked><span>인체공학 가속도 (손목 미세조작)</span></label><label class="control-toggle"><input id="mouse-click-lock" type="checkbox" checked><span>클릭 흔들림 방지 (Position Lock)</span></label></div>
       <p id="mouse-status" class="message" role="status">카메라를 시작한 뒤 마우스 제어를 켜세요.</p>
       <div class="mouse-guide" aria-label="마우스 손동작 안내">
-        <article data-mouse-mode="move"><span class="mouse-guide-number">01</span><div><h3>손을 편하게 펴고 이동</h3><p>손 전체를 움직여 커서 이동<br>커서는 손바닥 중심을 따라갑니다</p></div></article>
-        <article data-mouse-mode="left"><span class="mouse-guide-number">02</span><div><h3>엄지 + 검지 붙이기</h3><p>붙였다 떼면 좌클릭<br>붙인 채 움직이면 드래그</p></div></article>
+        <article data-mouse-mode="move"><span class="mouse-guide-number">01</span><div><h3>손을 편하게 펴고 이동</h3><p>손목을 책상에 댄 채 이동<br>미세 떨림 보정 및 가속 적용</p></div></article>
+        <article data-mouse-mode="left"><span class="mouse-guide-number">02</span><div><h3>엄지 + 검지 붙이기</h3><p>좌클릭 시 좌표 고정<br>붙인 채 움직이면 드래그</p></div></article>
         <article data-mouse-mode="right"><span class="mouse-guide-number">03</span><div><h3>엄지 + 중지 붙이기</h3><p>한 번 우클릭<br>떼었다 다시 붙여 재실행</p></div></article>
-        <article data-mouse-mode="scroll"><span class="mouse-guide-number">04</span><div><h3>엄지 + 약지 붙이기</h3><p>붙인 채 손 전체를 위아래로<br>움직여 스크롤</p></div></article>
+        <article data-mouse-mode="scroll"><span class="mouse-guide-number">04</span><div><h3>V(가위) 또는 엄지+약지</h3><p>손을 위아래로 움직여 스크롤<br>V자 제스처로 피로 없는 스크롤</p></div></article>
       </div>
       <p class="mouse-stop-note">손끝 대신 손바닥 중심으로 이동을 읽습니다. 손가락을 접거나 주먹을 쥐면 쉬고, 손을 내리면 입력을 멈춥니다.<br><kbd>Esc</kbd> 이 창에서 중지 · <kbd>Ctrl + Alt + M</kbd> 데스크톱 어디서든 중지</p>
     </section>
