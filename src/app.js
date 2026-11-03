@@ -28,7 +28,7 @@ let session = 0, raf = 0, lastVideoTime = -1, lastInference = 0, mediaUrl = null
 let cameraInfo = null, lastResultAt = null, fps = 0, lastStatsAt = 0;
 let enrollment = null, enrollmentModel = null, enrollmentContext = null, enrollmentError = null;
 let previewMoveId = 0;
-let controlMode = 'media';
+let controlMode = 'mouse';
 const mouse = new MouseWorkspace();
 
 function switchMode(mode) {
@@ -451,5 +451,5 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('beforeunload', () => { stopCamera(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); });
 renderProfiles(profiles[0]?.id || ''); syncMedia();
-if (location.hash === '#mouse' || globalThis.manuxDesktop) switchMode('mouse');
+switchMode(location.hash === '#media' ? 'media' : 'mouse');
 if (stored.error) message('#profile-message', `${stored.error} 기존 데이터를 보호하기 위해 새 저장을 멈췄습니다. 공통 모델은 사용할 수 있습니다.`, true);
