@@ -371,7 +371,7 @@ function infer(token) {
   raf = globalThis.manuxDesktop ? setTimeout(() => infer(token), 16) : requestAnimationFrame(() => infer(token));
   const now = performance.now();
   advanceEnrollment(now);
-  if (!vision || vision.busy || now - lastInference < (controlMode === 'mouse' ? 30 : 50) || camera.readyState < 2 || camera.currentTime === lastVideoTime) return;
+  if (!vision || vision.busy || now - lastInference < (controlMode === 'mouse' ? 10 : 30) || camera.readyState < 2 || camera.currentTime === lastVideoTime) return;
   lastInference = now; lastVideoTime = camera.currentTime;
   const client = vision;
   client.recognize(camera, now).then(packet => {

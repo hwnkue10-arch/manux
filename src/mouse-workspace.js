@@ -11,7 +11,7 @@ export class MouseWorkspace {
       const sensitivity = Number(this.$('#mouse-sensitivity')?.value ?? 1800);
       const ballistics = this.$('#mouse-ballistics') ? this.$('#mouse-ballistics').checked : true;
       const clickLock = this.$('#mouse-click-lock') ? this.$('#mouse-click-lock').checked : true;
-      return new AirMouseController({sensitivity, ballistics, clickLock, vScroll: true});
+      return new AirMouseController({sensitivity, smoothing: 0.70, ballistics, clickLock, vScroll: true});
     };
     this.controller = createController();
     this.active = false; this.ready = false; this.enabled = false; this.available = false;
