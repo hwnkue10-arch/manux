@@ -1,53 +1,41 @@
 @echo off
-chcp 65001 >nul
-title MANUX 에어 마우스 (Air Mouse)
+setlocal
 cd /d "%~dp0"
+title MANUX Air Mouse
+
+:: Clear any inherited electron node runner environment variable
+set ELECTRON_RUN_AS_NODE=
 
 echo ===================================================================
-echo     MANUX 에어 마우스 - 모니터 투명 HUD 오버레이 시제품
+echo     MANUX Air Mouse - Desktop App
 echo ===================================================================
 echo.
+echo [Starting] Launching MANUX Air Mouse Desktop App...
+echo.
+echo  * Control Paradigm:
+echo    1. [Pointer Move]: Index tip (LM 8) tracking with jitter filter
+echo    2. [Left Click / Drag]: Thumb + Middle touch (instant double-click)
+echo    3. [Right Click]: Thumb + Ring touch (independent buttons)
+echo    4. [Phone Touch Scroll]: Index + Middle V-sign flick up to scroll down
+echo    5. [Rest / Clutch]: Fist stops all tracking and inputs
+echo.
+echo  * Shortcuts:
+echo    - F11: Toggle Fullscreen Transparent HUD Overlay
+echo    - Esc: Return to Windowed Mode
+echo    - Ctrl + Alt + M: Emergency Stop Mouse Control
+echo.
 
-where node >nul 2>&1
-if errorlevel 1 (
-    echo [오류] Node.js가 설치되어 있지 않습니다.
-    echo https://nodejs.org 에서 Node.js LTS 버전을 설치한 뒤 다시 실행하세요.
-    echo.
-    pause
-    exit /b 1
+if exist "node_modules\.bin\electron.cmd" (
+    call "node_modules\.bin\electron.cmd" desktop\main.mjs
+) else (
+    call npm run desktop
 )
 
-if not exist "node_modules\@mediapipe\tasks-vision" (
-    echo [초기 설정] 손 추적 비전 패키지를 설치하고 있습니다...
-    call npm install --ignore-scripts
-)
-
-if not exist "public\models\gesture_recognizer.task" (
-    echo [초기 설정] 로컬 오프라인 인식 모델을 다운로드하고 있습니다...
-    call node scripts\setup.mjs
-)
-
-echo.
-echo [실행] Windows 에어 마우스 데스크톱 앱을 시작합니다...
-echo.
-echo  * 조작 패러다임 (인체공학 제스처 & 사각지대 소멸):
-echo    1. [👆 포인터 이동 (검지)]: 주먹 외 모든 자세에서 검지 끝(LM 8) 계속 추적 (어댑티브 떨림 방지)
-echo    2. [🤏 좌클릭 & 더블클릭 & 드래그]: 엄지 + 중지 맞닿음 (즉각 반응 더블클릭 · 연속 드래그)
-echo    3. [👆 우클릭]: 엄지 + 약지 맞닿음 (좌우 독립 제어 및 동시 클릭 지원)
-echo    4. [✌️ 폰 터치 스크롤 (제스처 2)]: 검지+중지 V자로 위로 그으면 아래 스크롤 (우클릭 충돌 차단)
-echo    5. [✊ 휴식 / 대기]: 주먹을 쥐면 모든 추적 및 입력 즉시 정지 (완전한 클러치 휴식)
-echo.
-echo  * 단축키 안내:
-echo    - F11: 화면 투명 HUD 오버레이 모드 토글 (아이 트래커 방식)
-echo    - Esc: 일반 창 모드로 복귀
-echo    - Ctrl + Alt + M: 언제든 즉시 비상 정지 (글로벌 핫키)
-echo.
-
-call npx electron desktop\main.mjs
 if errorlevel 1 (
     echo.
-    echo [안내] 브라우저 연습 모드로 전환합니다...
+    echo [Fallback] Opening Web Browser Practice Mode...
     start http://127.0.0.1:4173/#mouse
     call npm start
 )
 
+pause
