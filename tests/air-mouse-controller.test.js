@@ -398,39 +398,22 @@ test('pointerMode: index left pinch holds left button continuously for reliable 
   assert.ok(pRelease.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
 });
 
-test('pointerMode: index right pinch requires extended middle finger and never triggers in Gesture 1', () => {
+test('pointerMode: index right click triggers on Thumb + Pinky touch and never in Gesture 1 or Fist', () => {
   const s = session({pointerMode:'index', smoothing:1});
   // Gesture 1 (pointing with middle finger curled in palm)
   const g1 = s.hold('index');
   assert.equal(g1.at(-1).mode, 'move');
   assert.equal(g1.at(-1).pinch, null);
 
-  // Gesture 1 with thumb touching middle knuckle: middle is curled so it MUST NOT trigger right click
-  const g1WithThumbIn = hand('index');
-  g1WithThumbIn[4] = {x: g1WithThumbIn[9].x, y: g1WithThumbIn[9].y, z: 0}; // thumb at middle knuckle
-  const fakeRight = s.feed('index', {}, {landmarks: g1WithThumbIn});
-  assert.notEqual(fakeRight.mode, 'right', 'Curled middle finger must never trigger right click');
+  // Fist (all fingers curled) MUST BE IDLE and can never click
+  const fist = s.hold('fist');
+  assert.equal(fist.at(-1).mode, 'idle');
+  assert.equal(fist.flatMap(s => s.events).filter(e => e.type === 'button').length, 0);
 
-  // True middle pinch: middle finger extended to touch thumb
-  const rightStates = s.hold('right');
+  // Thumb + Pinky touch triggers Right Click
+  const rightStates = s.hold('index-right');
   assert.equal(rightStates.at(-1).mode, 'right');
   assert.ok(rightStates.flatMap(s => s.events).some(e => e.type === 'button' && e.button === 'right' && e.down));
-});
-
-test('pointerMode: index side trigger tap (thumb to index DIP) clicks without bending index tip', () => {
-  const s = session({pointerMode:'index', smoothing:1});
-  s.hold('index');
-
-  // Index finger stays extended (tip at 8), thumb touches index DIP (7)
-  const triggerPose = hand('index');
-  triggerPose[4] = {x: triggerPose[7].x + 0.02, y: triggerPose[7].y, z: 0};
-  const triggerStates = [
-    s.feed('index', {}, {landmarks: triggerPose}),
-    s.feed('index', {}, {landmarks: triggerPose}),
-    s.feed('index', {}, {landmarks: triggerPose}),
-  ];
-  assert.equal(triggerStates.at(-1).mode, 'left', 'Touching thumb to index DIP triggers left click');
-  assert.ok(triggerStates.flatMap(s => s.events).some(e => e.type === 'button' && e.button === 'left' && e.down));
 });
 
 test('pointerMode: index smartphone touch swipe scrolls down when swiping up, and fist lifts touch', () => {
@@ -465,4 +448,41 @@ test('pointerMode: index smartphone touch swipe scrolls down when swiping up, an
   // Moving hand down while in fist produces NO reverse scroll!
   const fistDown = s.feed('fist', {}, {landmarks: hand('fist', {y: 0.05})});
   assert.equal(fistDown.events.filter(e => e.type === 'scroll').length, 0);
+});
+
+test('pointerMode: index Thumb+Middle clicks left, Thumb+Pinky clicks right, Fist is strictly idle with zero click', () => {
+  const s = session({pointerMode:'index', smoothing:1});
+  s.hold('index');
+
+  // 1. Gesture 1 (Pointing): move mode, no pinch
+  const moveStates = s.hold('index');
+  assert.equal(moveStates.at(-1).mode, 'move');
+  assert.equal(moveStates.at(-1).pinch, null);
+
+  // 2. Thumb + Middle touch: Left Click & Drag
+  const leftStates = s.hold('index-left');
+  assert.equal(leftStates.at(-1).mode, 'left');
+  assert.ok(leftStates.flatMap(s => s.events).some(e => e.type === 'button' && e.button === 'left' && e.down));
+
+  // Release left pinch back to pointing
+  s.hold('index');
+
+  // 3. Thumb + Pinky touch: Right Click
+  const rightStates = s.hold('index-right');
+  assert.equal(rightStates.at(-1).mode, 'right');
+  assert.ok(rightStates.flatMap(s => s.events).some(e => e.type === 'button' && e.button === 'right' && e.down));
+
+  // 4. Clenched Fist: even with thumb touching curled fingers, it MUST BE IDLE and NEVER click!
+  const fistStates = s.hold('fist');
+  assert.equal(fistStates.at(-1).mode, 'idle');
+  assert.equal(fistStates.flatMap(s => s.events).filter(e => e.type === 'button').length, 0);
+
+  // 5. Active Pos Mapping: moving index in comfortable center zone (0.28 to 0.72) spans 0 to 1
+  const hLeft = hand('index'); hLeft[8] = {x: 0.72, y: 0.20, z: 0}; // mirroredX = 0.28 -> activePos.x = 0
+  const rLeft = s.feed('index', {}, {landmarks: hLeft});
+  assert.equal(rLeft.activePos.x, 0);
+
+  const hRight = hand('index'); hRight[8] = {x: 0.28, y: 0.20, z: 0}; // mirroredX = 0.72 -> activePos.x = 1
+  const rRight = s.feed('index', {}, {landmarks: hRight});
+  assert.ok(Math.abs(rRight.activePos.x - 1) < 1e-5);
 });

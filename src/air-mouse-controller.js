@@ -15,11 +15,20 @@ function straight(a, b, c) {
 function observation(landmarks, width, height, previousPinch, allowVScroll = false, pointerMode = 'index') {
   if (!Array.isArray(landmarks) || landmarks.length !== 21 || !Number.isFinite(width) ||
       !Number.isFinite(height) || width <= 0 || height <= 0) return null;
-  if (!landmarks.every(p => p && Number.isFinite(p.x) && Number.isFinite(p.y) &&
-      p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1 &&
-      (p.z === undefined || (Number.isFinite(p.z) && Math.abs(p.z) <= 3)))) return null;
+  const inBounds = pointerMode === 'index'
+    ? landmarks.every(p => p && Number.isFinite(p.x) && Number.isFinite(p.y) &&
+        p.x >= -0.25 && p.x <= 1.25 && p.y >= -0.25 && p.y <= 1.25 &&
+        (p.z === undefined || (Number.isFinite(p.z) && Math.abs(p.z) <= 3)))
+    : landmarks.every(p => p && Number.isFinite(p.x) && Number.isFinite(p.y) &&
+        p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1 &&
+        (p.z === undefined || (Number.isFinite(p.z) && Math.abs(p.z) <= 3)));
+  if (!inBounds) return null;
   // MediaPipe's z uses approximately the same scale as x. All axes below use video-width units.
-  const points = landmarks.map(p => ({x:p.x, y:p.y * height / width, z:p.z ?? 0}));
+  const points = landmarks.map(p => ({
+    x: pointerMode === 'index' ? clamp(p.x, 0, 1) : p.x,
+    y: (pointerMode === 'index' ? clamp(p.y, 0, 1) : p.y) * height / width,
+    z: p.z ?? 0
+  }));
   const palm = Math.max(dist2D(points[0], points[9]), dist2D(points[5], points[17]));
   if (palm < 0.025 || palm > 0.8) return null;
 
@@ -27,17 +36,17 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     dist2D(points[base + 3], points[0]) > dist2D(points[base + 1], points[0]) * 1.12;
   const index = extended(5), middle = extended(9), ring = extended(13), pinky = extended(17);
   const ratio = tip => dist2D(points[4], points[tip]) / palm;
-  const dIndexTip = ratio(8);
-  const dIndexDIP = dist2D(points[4], points[7]) / palm;
-  // Multi-point index touch in index mode: tip-to-tip pinch OR index DIP trigger tap (zero index movement!)
-  const dIndex = pointerMode === 'index' ? Math.min(dIndexTip, dIndexDIP * 1.05) : dIndexTip;
+  const dIndex = ratio(8);
   const dMiddle = ratio(12);
   const dRing = ratio(16);
+  const dPinky = ratio(20);
   const dTwoFinger = dist2D(points[8], points[12]) / palm;
 
   // Clenched fingers count: fingers curled tightly into palm
   const clenchedCount = [8, 12, 16, 20].filter(tip => dist2D(points[tip], points[0]) < palm * 1.05).length;
-  const isFist = clenchedCount >= 2;
+  const isFist = pointerMode === 'index'
+    ? (clenchedCount >= 3 || (!index && clenchedCount >= 2))
+    : (clenchedCount >= 2);
 
   // Reachable pinch tips must extend away from the wrist, and thumb must extend from wrist
   const reachable = (tip, base) => !isFist &&
@@ -65,31 +74,41 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   let anchor = null;
 
   if (pointerMode === 'index') {
-    // === NEW PARADIGM: Strict Gesture 1, Zero Click-Dip Pinch/Pistol, Peace Scroll, Everything else = Rest ===
+    // === ERGONOMIC PARADIGM: Index Pointer + Thumb/Middle Left Click + Thumb/Pinky Right Click ===
+    // 1. Cursor strictly follows Index Tip (LM 8) - index never moves or bends for clicking!
+    // 2. Left Click & Continuous Drag: Thumb (LM 4) + Middle (LM 12) pinch
+    // 3. Right Click: Thumb (LM 4) + Pinky (LM 20) pinch
+    // 4. Smartphone Touch Scroll: Index + Middle extended (✌️ Peace)
+    // 5. Rest / Idle: Fist (0), 5-finger open palm, or any non-pointing pose = 100% IDLE!
+    //    Clicks are strictly blocked when in a fist or when index is not pointing up.
 
     // 1. Gesture 2: Smartphone Touch Scroll (Index + Middle extended, Ring + Pinky curled, Thumb unpinched)
-    const isScrollGesture = allowVScroll && index && middle && !ring && !pinky && dIndex > 0.38 && dMiddle > 0.38;
+    const isScrollGesture = allowVScroll && index && middle && !ring && !pinky && dMiddle > 0.38 && dPinky > 0.40;
 
-    // 2. Right Click:
-    //    Thumb + Middle pinch, BUT Middle MUST be extended away from palm (NOT curled into a fist!)
-    const middleNotCurled = dist2D(points[12], points[0]) > palm * 0.95 && dist2D(points[12], points[9]) > palm * 0.33;
-    const isRightPinchValid = middleNotCurled && dMiddle < (previousPinch === 'right' ? 0.44 : 0.34) && dIndex > dMiddle * 1.25;
+    // 2. Right Click: Thumb (LM 4) + Pinky (LM 20) touch
+    //    Strict: only when index is pointing (not in fist), pinky is close (< 0.28), and clearly closer than middle
+    const isPinkyRight = index && !isFist &&
+      dPinky < (previousPinch === 'right' ? 0.36 : 0.28) &&
+      dPinky < dMiddle * 0.85;
 
-    // 3. Left Click & Drag:
-    //    Trigger A: Index + Thumb pinch (tip-to-tip OR trigger tap to index joint; works whether middle/ring/pinky are curled in a fist or not!)
-    //    Trigger B: Pistol / Gun pose (index extended, middle/ring/pinky curled, thumb popped out)
-    const isPinchLeft = !isRightPinchValid && dIndex < (previousPinch === 'left' ? 0.48 : 0.38) &&
-      dist2D(points[4], points[0]) > palm * 0.40 &&
-      (dMiddle > dIndex * 1.15 || !middle);
-    const isPistolLeft = index && !middle && !ring && !pinky && thumbOut && dIndex > 0.45;
-    const isLeft = isPinchLeft || isPistolLeft;
+    // 3. Left Click: Thumb (LM 4) + Middle (LM 12) touch
+    //    Strict: only when index is pointing (not in fist), middle is close (< 0.28), and clearly closer than pinky
+    const isMiddleLeft = index && !isFist && !isPinkyRight &&
+      dMiddle < (previousPinch === 'left' ? 0.36 : 0.28) &&
+      dMiddle < dPinky * 0.85;
+
+    // Direct Index + Thumb pinch compatibility fallback
+    const isIndexLeftCompat = index && !isFist && !isPinkyRight && !isMiddleLeft &&
+      dIndex < (previousPinch === 'left' ? 0.35 : 0.26) && dIndex < dMiddle * 0.85;
+
+    const isLeft = isMiddleLeft || isIndexLeftCompat;
+    const isRight = isPinkyRight;
 
     // 4. Strict Gesture 1 (Pointing / Cursor Move):
-    //    ONLY when index is extended, and middle, ring, pinky are ALL curled!
-    //    And thumb is NOT in a click pose (not pinching, not pistol)
-    const isStrictGesture1 = index && !middle && !ring && !pinky && !thumbOut && dIndex >= 0.38;
+    //    Index is extended, Middle/Ring/Pinky curled in front, and NOT pinching
+    const isStrictGesture1 = index && !middle && !isLeft && !isRight;
 
-    if (isRightPinchValid) {
+    if (isRight) {
       mode = 'right';
       pinch = 'right';
     } else if (isLeft) {
@@ -113,14 +132,8 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
         x: (points[8].x + points[12].x) * 0.5,
         y: (points[8].y + points[12].y) * 0.5,
       };
-    } else if (mode === 'left') {
-      // Cursor stays on index tip for zero click-dip
-      anchor = {
-        x: points[8].x,
-        y: points[8].y,
-      };
     } else {
-      // Cursor follows Index Fingertip (LM 8) directly!
+      // Move, Left Drag, and Right Click: cursor follows Index Fingertip (LM 8) directly!
       anchor = {
         x: points[8].x,
         y: points[8].y,
@@ -148,12 +161,12 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     };
   }
 
-  // Golden ratio active zone mapping coordinates (0 ~ 1 normalized across comfortable desk view)
+  // Deadzone-free compact active zone mapping coordinates (0 ~ 1 normalized across comfortable desk view)
   // Mirror x so moving right in front of webcam moves right on monitor
   const mirroredX = 1.0 - (points[8].x);
   const activePos = {
-    x: clamp((mirroredX - 0.18) / 0.64, 0, 1),
-    y: clamp((points[8].y - 0.15) / 0.70, 0, 1),
+    x: clamp((mirroredX - 0.28) / 0.44, 0, 1),
+    y: clamp((points[8].y - 0.20) / 0.48, 0, 1),
   };
 
   const fingertips = {
@@ -167,7 +180,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
   const unpinched = dIndex >= 0.44 && dMiddle >= 0.44;
 
-  return {mode, pinch, anchor, vScroll: isSmartphoneScroll, dIndex, dMiddle, dTwoFinger, palm, fingertips, activePos, unpinched};
+  return {mode, pinch, anchor, vScroll: isSmartphoneScroll, dIndex, dMiddle, dPinky, dTwoFinger, palm, fingertips, activePos, unpinched};
 }
 
 /** Pure landmark-to-input controller. It never sends OS events or stores camera data. */
@@ -336,15 +349,9 @@ export class AirMouseController {
     }
     this.observations++;
     if (this.mode !== observed.mode) {
-      const targetHoldMs = (this.pointerMode === 'index' && (observed.mode === 'left' || observed.mode === 'right'))
-        ? Math.min(this.holdMs, 60)
-        : this.holdMs;
-      const minObs = (this.pointerMode === 'index' && (observed.mode === 'left' || observed.mode === 'right'))
-        ? 2
-        : MIN_OBSERVATIONS;
-      const progress = targetHoldMs === 0 ? 1 : (now - this.candidateSince) / targetHoldMs;
+      const progress = this.holdMs === 0 ? 1 : (now - this.candidateSince) / this.holdMs;
       this.anchor = this.filtered = observed.anchor;
-      if (progress < 1 || this.observations < minObs) return this.state('holding', events, progress);
+      if (progress < 1 || this.observations < MIN_OBSERVATIONS) return this.state('holding', events, progress);
       this.mode = observed.mode;
       if (this.mode === 'left') {
         events.push({type:'button', button:'left', down:true});
@@ -372,6 +379,11 @@ export class AirMouseController {
     };
     let rawDx = -(next.x - this.filtered.x) * this.sensitivity;
     let rawDy = (next.y - this.filtered.y) * this.sensitivity;
+    if (this.pointerMode === 'index') {
+      // Gain scaling: maps the comfortable chest/desk active box (~0.44 span) across full screen
+      rawDx *= 2.0;
+      rawDy *= 2.0;
+    }
     this.filtered = next;
 
     // Cross-View coordinate rotation compensation (e.g. -22° for diagonal top-left webcam)

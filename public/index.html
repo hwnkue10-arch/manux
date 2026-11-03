@@ -52,7 +52,7 @@
       <div class="mouse-control-row" style="margin-top:10px">
         <label for="mouse-pointer-mode" style="font-size:12px; font-weight:600; color:var(--muted)">추적 패러다임</label>
         <select id="mouse-pointer-mode">
-          <option value="index" selected>👆 제스처 1 검지 직접 추적 + 🤏 좌클릭 드래그 + ✌️ 폰 스크롤 (신형)</option>
+          <option value="index" selected>👆 신형: 검지 포인터 + 엄지·중지 좌클릭 + 엄지·소지 우클릭 + ✌️ 폰 스크롤</option>
           <option value="palm">✋ 손바닥 코어 추적 (기존 방식)</option>
         </select>
       </div>
@@ -70,9 +70,9 @@
       <div class="mouse-control-row" style="margin-top:10px"><label class="control-toggle"><input id="mouse-ballistics" type="checkbox" checked><span>인체공학 가속도 (손목 미세조작)</span></label><label class="control-toggle"><input id="mouse-click-lock" type="checkbox" checked><span>클릭 흔들림 방지 (Position Lock)</span></label><label class="control-toggle"><input id="mouse-cross-view" type="checkbox" checked><span>Cross-View 대각선 보정 (회전 -22° · Y축 2.2배)</span></label></div>
       <p id="mouse-status" class="message" role="status">카메라를 시작한 뒤 마우스 제어를 켜세요.</p>
       <div class="mouse-guide" aria-label="마우스 손동작 안내">
-        <article data-mouse-mode="move"><span class="mouse-guide-number">01</span><div><h3>👆 제스처 1: 포인터 이동</h3><p>검지 끝(LM 8) 직접 추적<br>황금비 활성 영역 4방향 매핑</p></div></article>
-        <article data-mouse-mode="left"><span class="mouse-guide-number">02</span><div><h3>🤏 핀치: 좌클릭 & 연속 드래그</h3><p>엄지 + 검지 맞닿으면 클릭 유지<br>이동 시 끊김 없는 100% 드래그</p></div></article>
-        <article data-mouse-mode="right"><span class="mouse-guide-number">03</span><div><h3>👆 중지 핀치: 우클릭</h3><p>엄지 + 중지 맞닿으면 우클릭<br>검지 간섭 차단 배타적 인식</p></div></article>
+        <article data-mouse-mode="move"><span class="mouse-guide-number">01</span><div><h3>👆 검지 포인터 이동</h3><p>검지 끝(LM 8) 직접 추적<br>사각지대 없는 콤팩트 활성 매핑</p></div></article>
+        <article data-mouse-mode="left"><span class="mouse-guide-number">02</span><div><h3>🤏 엄지+중지: 좌클릭 & 드래그</h3><p>엄지+중지 맞닿으면 좌클릭 유지<br>검지 흔들림 0% · 100% 드래그</p></div></article>
+        <article data-mouse-mode="right"><span class="mouse-guide-number">03</span><div><h3>👆 엄지+소지: 우클릭</h3><p>엄지+새끼손가락 맞닿으면 우클릭<br>주먹 쥐면 오클릭 100% 원천 차단</p></div></article>
         <article data-mouse-mode="scroll"><span class="mouse-guide-number">04</span><div><h3>✌️ 제스처 2: 폰 터치 스크롤</h3><p>V자 펴고 위로 그으면 아래 스크롤<br>주먹 쥐어 손 떼기 (역스크롤 0%)</p></div></article>
       </div>
       <p class="mouse-stop-note">💡 <b>Cross-View 권장 배치</b>: 웹캠을 <b>모니터 좌측 상단</b>에 두고 오른손을 <b>10~11시 대각선</b>으로 편안하게 두면 가려짐 없는 최상의 인식이 가능합니다.<br><kbd>Esc</kbd> 창 모드 복귀 · <kbd>F11</kbd> 오버레이 토글 · <kbd>Ctrl + Alt + M</kbd> 어디서든 비상 정지</p>
