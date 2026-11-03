@@ -8,7 +8,7 @@ function straight(a, b, c) {
   const u = {x:a.x - b.x, y:a.y - b.y, z:a.z - b.z};
   const v = {x:c.x - b.x, y:c.y - b.y, z:c.z - b.z};
   const length = Math.hypot(u.x, u.y, u.z) * Math.hypot(v.x, v.y, v.z);
-  return length > 1e-8 && (u.x * v.x + u.y * v.y + u.z * v.z) / length < -0.82;
+  return length > 1e-8 && (u.x * v.x + u.y * v.y + u.z * v.z) / length < -0.70;
 }
 
 function observation(landmarks, width, height, previousPinch, allowVScroll = false) {
@@ -26,24 +26,26 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const index = extended(5), middle = extended(9), ring = extended(13), pinky = extended(17);
   const fingerExtensions = new Map([[5,index],[9,middle],[13,ring],[17,pinky]]);
   const ratio = tip => distance(points[4], points[tip]) / palm;
-  // Reject a thumb resting against a folded knuckle: pinch tips must extend beyond the palm.
-  const reachable = (tip, base) => distance(points[tip], points[0]) > palm * 0.9 &&
-    distance(points[tip], points[base]) > palm * 0.3;
+  const isFist = [8, 12, 16, 20].every(tip => distance(points[tip], points[0]) < palm * 1.05);
+  // Reachable pinch tips must extend away from the wrist, and thumb must extend from wrist
+  const reachable = (tip, base) => !isFist &&
+    distance(points[tip], points[0]) > palm * 1.0 &&
+    distance(points[tip], points[base]) > palm * 0.35 &&
+    distance(points[4], points[0]) > palm * 0.65;
   const fingers = [
-    {mode:'left', tip:8, base:5},
-    {mode:'right', tip:12, base:9},
-    {mode:'scroll', tip:16, base:13},
-  ].map(f => ({...f, ratio:ratio(f.tip), reachable:reachable(f.tip, f.base) &&
-    [...fingerExtensions].filter(([base, open]) => base !== f.base && open).length >= 2}));
-  const pinches = fingers.filter(f => f.reachable && f.ratio < (previousPinch === f.mode ? 0.4 : 0.27));
+    {mode:'left', tip:8, base:5, entry:0.35},
+    {mode:'right', tip:12, base:9, entry:0.38},
+    {mode:'scroll', tip:16, base:13, entry:0.35},
+  ].map(f => ({...f, ratio:ratio(f.tip), reachable:reachable(f.tip, f.base)}));
+  const pinches = fingers.filter(f => f.reachable && f.ratio < (previousPinch === f.mode ? 0.46 : f.entry));
   const ambiguous = pinches.length > 1 || (pinches.length === 1 && fingers.some(f =>
-    f.mode !== pinches[0].mode && f.reachable && f.ratio < 0.4));
+    f.mode !== pinches[0].mode && f.reachable && f.ratio < 0.42));
   const pinch = ambiguous ? null : pinches[0]?.mode ?? null;
   // Ergonomic V-sign scroll: index and middle extended, ring and pinky folded (when enabled)
   const vScroll = allowVScroll && !ambiguous && !pinch && index && middle && !ring && !pinky;
   const mode = ambiguous ? 'idle' : pinch || (vScroll ? 'scroll' : ([index,middle,ring,pinky].filter(Boolean).length >= 3 ? 'move' : 'idle'));
   const anchor = [0,5,9,13,17].reduce((p, i) => ({x:p.x + points[i].x / 5, y:p.y + points[i].y / 5}), {x:0,y:0});
-  return {mode, pinch, anchor, vScroll, unpinched:!ambiguous && fingers.every(f => !f.reachable || f.ratio >= 0.42)};
+  return {mode, pinch, anchor, vScroll, unpinched:!ambiguous && fingers.every(f => !f.reachable || f.ratio >= 0.44)};
 }
 
 /** Pure landmark-to-input controller. It never sends OS events or stores camera data. */
@@ -124,8 +126,8 @@ export class AirMouseController {
     if (gap || changedHand) return this.interrupt('tracking-reset');
 
     this.pinch = observed.pinch;
-    // Neither absent tracking nor an ambiguous pinch is a release gesture.
-    if (observed.unpinched) {
+    // Either a clear unpinched hand or holding the base move pose arms actions.
+    if (observed.unpinched || (this.mode === 'move' && !observed.pinch)) {
       this.releaseSince ??= now;
       if (now - this.releaseSince >= RELEASE_MS) this.armed = true;
     } else this.releaseSince = null;

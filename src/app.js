@@ -304,6 +304,18 @@ function drawHands(landmarks) {
       ctx.beginPath(); ctx.moveTo(hand[a].x * width, hand[a].y * height); ctx.lineTo(hand[b].x * width, hand[b].y * height); ctx.stroke();
     }
     for (const point of hand) { ctx.beginPath(); ctx.arc(point.x * width, point.y * height, Math.max(2, width / 350), 0, Math.PI * 2); ctx.fill(); }
+    if (controlMode === 'mouse') {
+      const p4 = hand[4], p8 = hand[8], p12 = hand[12];
+      const d8 = Math.hypot(p4.x - p8.x, (p4.y - p8.y) * height / width);
+      const d12 = Math.hypot(p4.x - p12.x, (p4.y - p12.y) * height / width);
+      if (d8 < 0.11) {
+        ctx.strokeStyle = '#22c55e'; ctx.lineWidth = Math.max(4, width / 160);
+        ctx.beginPath(); ctx.moveTo(p4.x * width, p4.y * height); ctx.lineTo(p8.x * width, p8.y * height); ctx.stroke();
+      } else if (d12 < 0.13) {
+        ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = Math.max(4, width / 160);
+        ctx.beginPath(); ctx.moveTo(p4.x * width, p4.y * height); ctx.lineTo(p12.x * width, p12.y * height); ctx.stroke();
+      }
+    }
   }
 }
 function qualityText(quality, handPresent) {
