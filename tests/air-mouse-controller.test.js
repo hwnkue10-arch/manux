@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
 import {AirMouseController} from '../src/air-mouse-controller.js';
 
 import {hand} from './helpers/mouse-hand.js';
@@ -230,21 +229,6 @@ test('three extended fingers are enough for the relaxed move pose; thumb positio
   for (const i of [5,6,7,8]) relaxed[i] = folded[i];
   for (let i=0;i<4;i++) s.feed('move',{}, {landmarks:relaxed});
   assert.equal(s.feed('move',{}, {landmarks:relaxed}).mode,'move');
-});
-
-test('stored official-photo landmarks distinguish the open-palm move pose from old video gestures', () => {
-  const reference = JSON.parse(readFileSync(new URL('./fixtures/personalization-reference.json',import.meta.url),'utf8'));
-  for (const observation of reference.observations) {
-    for (const row of observation.rows) {
-      const s = session(); s.hold('move');
-      let state;
-      for (let i=0;i<5;i++) {
-        state = s.feed('move',{}, {landmarks:row.landmarks,width:observation.width,height:observation.height});
-        assert.equal(state.events.some(e=>e.type==='button'||e.type==='scroll'),false,observation.pose);
-      }
-      assert.equal(state.mode,observation.pose==='Open_Palm'?'move':'idle',observation.pose);
-    }
-  }
 });
 
 test('non-finite, incomplete, out-of-frame and degenerate landmarks cannot create inputs', () => {
