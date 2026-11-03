@@ -16,6 +16,9 @@ export function validateMouseEvents(events) {
     if (event.type === 'move' && exactKeys(event, ['type', 'dx', 'dy']) && finiteWithin(event.dx, 100) && finiteWithin(event.dy, 100)) {
       return {type:'move', dx:event.dx, dy:event.dy};
     }
+    if (event.type === 'moveTo' && exactKeys(event, ['type', 'x', 'y']) && finiteWithin(event.x, 1) && finiteWithin(event.y, 1)) {
+      return {type:'moveTo', x:event.x, y:event.y};
+    }
     if (event.type === 'button' && exactKeys(event, ['type', 'button', 'down']) && ['left', 'right'].includes(event.button) && typeof event.down === 'boolean') {
       return {type:'button', button:event.button, down:event.down};
     }

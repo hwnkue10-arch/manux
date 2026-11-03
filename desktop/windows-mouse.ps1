@@ -52,6 +52,7 @@ public static class ManuxMouse {
         if (e == null) throw new Exception("Invalid mouse event.");
         string type = Text(e,"type");
         if (type == "move") { Keys(e,"type","dx","dy"); Number(e,"dx",100); Number(e,"dy",100); }
+        else if (type == "moveTo") { Keys(e,"type","x","y"); Number(e,"x",1.0); Number(e,"y",1.0); }
         else if (type == "scroll") { Keys(e,"type","dy"); Number(e,"dy",240); }
         else if (type == "button") {
             Keys(e,"type","button","down");
@@ -84,6 +85,12 @@ public static class ManuxMouse {
             int x=(int)Math.Truncate(FractionX), y=(int)Math.Truncate(FractionY);
             FractionX-=x; FractionY-=y;
             if (x != 0 || y != 0) Emit(0x0001,x,y,0);
+        } else if (type == "moveTo") {
+            double nx = Math.Max(0.0, Math.Min(1.0, Number(e,"x",1.0)));
+            double ny = Math.Max(0.0, Math.Min(1.0, Number(e,"y",1.0)));
+            int ax = (int)Math.Round(nx * 65535.0);
+            int ay = (int)Math.Round(ny * 65535.0);
+            Emit(0x8001, ax, ay, 0);
         } else if (type == "scroll") {
             // CSS delta is positive downward; Windows WHEEL is positive upward.
             FractionWheel += -Number(e,"dy",240) * 1.2;

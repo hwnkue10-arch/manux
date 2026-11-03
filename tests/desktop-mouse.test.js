@@ -45,7 +45,7 @@ function fixture() {
 }
 
 test('mouse validator accepts only bounded finite mouse events and copies data', () => {
-  const events = [{type:'move',dx:2,dy:-3.25}, {type:'button',button:'left',down:true}, {type:'scroll',dy:240}, {type:'release'}];
+  const events = [{type:'move',dx:2,dy:-3.25}, {type:'moveTo',x:0.5,y:0.25}, {type:'button',button:'left',down:true}, {type:'scroll',dy:240}, {type:'release'}];
   assert.deepEqual(validateMouseEvents(events), events);
   assert.notEqual(validateMouseEvents(events)[0], events[0]);
   for (const invalid of [[{type:'move',dx:101,dy:0}], [{type:'move',dx:NaN,dy:0}], [{type:'move',dx:0,dy:Infinity}],

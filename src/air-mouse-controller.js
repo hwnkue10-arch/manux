@@ -12,6 +12,64 @@ function straight(a, b, c) {
   return length > 1e-8 && (u.x * v.x + u.y * v.y + u.z * v.z) / length < -0.70;
 }
 
+class LowPassFilter {
+  constructor(alpha = 1) {
+    this.alpha = alpha;
+    this.s = null;
+  }
+  filter(v, alpha = this.alpha) {
+    this.s = this.s === null ? v : alpha * v + (1 - alpha) * this.s;
+    return this.s;
+  }
+  reset() { this.s = null; }
+}
+
+class OneEuroFilter {
+  constructor({minCutoff = 0.25, beta = 9.0, dCutoff = 1.0} = {}) {
+    this.minCutoff = minCutoff;
+    this.beta = beta;
+    this.dCutoff = dCutoff;
+    this.xFilter = new LowPassFilter();
+    this.dxFilter = new LowPassFilter();
+    this.lastTime = null;
+    this.lastValue = null;
+  }
+
+  alpha(cutoff, dt) {
+    const tau = 1.0 / (2 * Math.PI * cutoff);
+    return 1.0 / (1.0 + tau / dt);
+  }
+
+  filter(v, now) {
+    if (!Number.isFinite(now)) return v;
+    if (this.lastTime === null || this.lastValue === null) {
+      this.lastTime = now;
+      this.lastValue = v;
+      this.xFilter.reset();
+      this.dxFilter.reset();
+      return this.xFilter.filter(v);
+    }
+    const dt = Math.max(1e-4, (now - this.lastTime) / 1000.0);
+    this.lastTime = now;
+
+    const dValue = (v - this.lastValue) / dt;
+    this.lastValue = v;
+    const aD = this.alpha(this.dCutoff, dt);
+    const edValue = this.dxFilter.filter(dValue, aD);
+
+    const cutoff = this.minCutoff + this.beta * Math.abs(edValue);
+    const a = this.alpha(cutoff, dt);
+    return this.xFilter.filter(v, a);
+  }
+
+  reset() {
+    this.lastTime = null;
+    this.lastValue = null;
+    this.xFilter.reset();
+    this.dxFilter.reset();
+  }
+}
+
 function observation(landmarks, width, height, previousPinch, allowVScroll = false, pointerMode = 'index') {
   if (!Array.isArray(landmarks) || landmarks.length !== 21 || !Number.isFinite(width) ||
       !Number.isFinite(height) || width <= 0 || height <= 0) return null;
@@ -72,21 +130,27 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   let anchor = null;
 
   if (pointerMode === 'index') {
-    // === ERGONOMIC PARADIGM: Independent Left/Right Click + Always Track Index Tip ===
-    // 1. Pointer: Cursor always tracks Index Tip (LM 8) whenever not a fist (주먹).
-    // 2. Left Click: Thumb (LM 4) + Middle (LM 12) pinch. Independent!
-    // 3. Right Click: Thumb (LM 4) + Ring (LM 16) pinch. Independent!
-    // 4. Simultaneous Click: If both touch thumb, BOTH left and right are active!
-    // 5. V-sign Scroll: Index + Middle extended. V-sign takes strict precedence over right click so curled ring never triggers right click.
+    // === ERGONOMIC PARADIGM: Absolute 1:1 Mapping + Pure Gesture 2 Scroll + Independent Clicks ===
+    // 1. Pointer: Cursor follows Index Tip (LM 8) in absolute coordinates (100% coincident with AR HUD).
+    // 2. Strict Gesture 2 (V-Sign): Index + Middle extended upwards, Ring + Pinky curled into palm, clean V gap.
+    //    WHILE IN SCROLL: Left and Right clicks are 100% BLOCKED and suppressed!
+    // 3. Left Click: Thumb (LM 4) + Middle (LM 12) pinch. Independent!
+    // 4. Right Click: Thumb (LM 4) + Ring (LM 16) pinch. Independent!
+    // 5. Simultaneous Click: If both touch thumb, BOTH left and right are active!
     // 6. Rest / Idle: Strictly Fist (주먹: all curled).
 
-    // Gesture 2: Smartphone Touch Scroll (✌️ Peace: Index & Middle extended, Ring & Pinky curled, unpinched)
-    const isScrollGesture = allowVScroll && index && middle && !ring && !pinky && dMiddle > 0.38;
+    // Pure Gesture 2: strictly V-sign (Index & Middle extended, Ring & Pinky curled into palm, fingers separated)
+    const isScrollGesture = allowVScroll &&
+      index && middle && !ring && !pinky &&
+      dist2D(points[16], points[0]) < palm * 1.10 &&
+      dist2D(points[20], points[0]) < palm * 1.10 &&
+      dTwoFinger > 0.16 &&
+      dMiddle > 0.40 && dRing > 0.40 && dIndex > 0.40;
 
-    // Independent Left Click: Thumb + Middle touch
+    // Independent Left Click: Thumb + Middle touch (ONLY when NOT scrolling and NOT in fist)
     const isLeft = !isFist && !isScrollGesture && (dMiddle < (previousPinch === 'left' || previousPinch === 'both' ? 0.35 : 0.28));
 
-    // Independent Right Click: Thumb + Ring touch (suppressed during V-sign scroll so curled ring cannot falsely trigger right click)
+    // Independent Right Click: Thumb + Ring touch (ONLY when NOT scrolling and NOT in fist)
     const isRight = !isFist && !isScrollGesture && (dRing < (previousPinch === 'right' || previousPinch === 'both' ? 0.35 : 0.28));
 
     if (isFist) {
@@ -121,7 +185,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
       };
     }
   } else {
-    // === LEGACY PARADIGM: Open Palm Move + Rigid Palm Anchor ===
+    // === LEGACY PALM MODE: Open Palm Move + Rigid Palm Anchor ===
     const fingers = [
       {mode:'left', tip:8, base:5, pinch:isLeftPinch, ratio:dIndex, reachable:reachable(8, 5)},
       {mode:'right', tip:12, base:9, pinch:isRightPinch, ratio:dMiddle, reachable:reachable(12, 9)},
@@ -182,6 +246,11 @@ export class AirMouseController {
     this.vScroll = Boolean(vScroll);
     this.rotationDeg = Number.isFinite(rotationDeg) ? rotationDeg : 0;
     this.gainY = Number.isFinite(gainY) ? gainY : 1.0;
+    this.euroU = new OneEuroFilter({minCutoff: 0.25, beta: 9.0});
+    this.euroV = new OneEuroFilter({minCutoff: 0.25, beta: 9.0});
+    this.lastEmittedU = null;
+    this.lastEmittedV = null;
+    this.lockPos = null;
     this.reset();
   }
 
@@ -222,6 +291,11 @@ export class AirMouseController {
     this.leftReleaseFrames = 0;
     this.lastFingertips = null;
     this.lastActivePos = null;
+    this.euroU?.reset();
+    this.euroV?.reset();
+    this.lastEmittedU = null;
+    this.lastEmittedV = null;
+    this.lockPos = null;
     return this.state('disabled', [{type:'release'}]);
   }
 
@@ -246,6 +320,11 @@ export class AirMouseController {
     this.scrollOriginY = null;
     this.lastTouchY = null;
     this.leftReleaseFrames = 0;
+    this.euroU?.reset();
+    this.euroV?.reset();
+    this.lastEmittedU = null;
+    this.lastEmittedV = null;
+    this.lockPos = null;
     if (disarm) this.armed = false;
     return this.state(phase, events);
   }
@@ -284,32 +363,117 @@ export class AirMouseController {
     const events = [];
 
     if (this.pointerMode === 'index') {
-      // === ERGONOMIC INDEX MODE: Instant Independent Buttons & Double-Click Support ===
-      const wantLeft = (observed.mode === 'left' || observed.mode === 'both');
-      const wantRight = (observed.mode === 'right' || observed.mode === 'both');
-
-      if (wantLeft !== this.leftDown) {
-        this.leftDown = wantLeft;
-        events.push({type: 'button', button: 'left', down: wantLeft});
-        if (wantLeft) {
-          this.dragDisplacement = 0;
-          this.dragUnlocked = false;
-        }
-      }
-
-      if (wantRight !== this.rightDown) {
-        this.rightDown = wantRight;
-        events.push({type: 'button', button: 'right', down: wantRight});
-      }
-
+      // === ERGONOMIC INDEX MODE: Absolute 1:1 Pointer + Independent Instant Clicks ===
       this.mode = observed.mode;
       this.pinch = observed.pinch;
+
+      if (this.mode === 'scroll') {
+        // Strict Scroll Rule: Left & Right clicks are 100% blocked during scroll!
+        if (this.leftDown) {
+          events.push({type: 'button', button: 'left', down: false});
+          this.leftDown = false;
+        }
+        if (this.rightDown) {
+          events.push({type: 'button', button: 'right', down: false});
+          this.rightDown = false;
+        }
+      } else if (this.mode !== 'idle') {
+        // Independent Left Button (Thumb + Middle)
+        const wantLeft = (this.mode === 'left' || this.mode === 'both');
+        if (wantLeft !== this.leftDown) {
+          this.leftDown = wantLeft;
+          events.push({type: 'button', button: 'left', down: wantLeft});
+          if (wantLeft) {
+            this.dragDisplacement = 0;
+            this.dragUnlocked = false;
+            this.lockPos = null;
+          }
+        }
+
+        // Independent Right Button (Thumb + Ring)
+        const wantRight = (this.mode === 'right' || this.mode === 'both');
+        if (wantRight !== this.rightDown) {
+          this.rightDown = wantRight;
+          events.push({type: 'button', button: 'right', down: wantRight});
+        }
+      }
 
       if (this.mode === 'idle') {
         const result = this.interrupt('ready', false);
         result.events.unshift(...events);
         return result;
       }
+
+      // === ABSOLUTE 1:1 POSITIONING & 1€ FILTER JITTER REMOVAL ===
+      const rawU = observed.activePos.x;
+      const rawV = observed.activePos.y;
+
+      let filtU = this.euroU.filter(rawU, now);
+      let filtV = this.euroV.filter(rawV, now);
+
+      // Click Freeze Lock: lock micro-displacement immediately following click until intentional drag
+      if (this.leftDown) {
+        if (!this.dragUnlocked) {
+          if (this.lockPos === null) {
+            this.lockPos = {u: filtU, v: filtV};
+          }
+          const dragDist = Math.hypot((filtU - this.lockPos.u) * 1920, (filtV - this.lockPos.v) * 1080);
+          if (dragDist < 16) {
+            filtU = this.lockPos.u;
+            filtV = this.lockPos.v;
+          } else {
+            this.dragUnlocked = true;
+          }
+        }
+      } else {
+        this.lockPos = null;
+      }
+
+      // Stationary Tremor Gate (Deadband): when hand is virtually motionless at rest, freeze cursor completely
+      if (this.lastEmittedU !== null && this.lastEmittedV !== null) {
+        const deltaPx = Math.hypot((filtU - this.lastEmittedU) * 1920, (filtV - this.lastEmittedV) * 1080);
+        if (deltaPx < 2.5 && !this.leftDown) {
+          filtU = this.lastEmittedU;
+          filtV = this.lastEmittedV;
+        }
+      }
+      this.lastEmittedU = filtU;
+      this.lastEmittedV = filtV;
+
+      observed.activePos.x = clamp(Number(filtU.toFixed(4)), 0, 1);
+      observed.activePos.y = clamp(Number(filtV.toFixed(4)), 0, 1);
+
+      if (this.mode === 'scroll') {
+        // === Smartphone Touch Swipe Scroll ===
+        if (this.lastTouchY === null) {
+          this.lastTouchY = observed.anchor.y;
+        }
+        const motionY = observed.anchor.y - this.lastTouchY;
+        this.lastTouchY = observed.anchor.y;
+        if (Math.abs(motionY) > 0.0008) {
+          const scrollInput = -motionY * this.sensitivity * 1.6;
+          this.remaining.y += scrollInput;
+          const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
+          if (wheel) {
+            events.push({type: 'scroll', dy: wheel});
+            this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
+          }
+        }
+      } else {
+        this.lastTouchY = null;
+        // Absolute cursor movement event (1:1 coincident with HUD reticle)
+        events.push({type: 'moveTo', x: observed.activePos.x, y: observed.activePos.y});
+      }
+
+      return this.state('active', events, 1, {
+        fingertips: observed.fingertips,
+        activePos: observed.activePos,
+        dIndex: observed.dIndex,
+        dMiddle: observed.dMiddle,
+        dRing: observed.dRing,
+        dPinky: observed.dPinky,
+        dTwoFinger: observed.dTwoFinger
+      });
     } else {
       // === LEGACY PALM MODE ===
       this.pinch = observed.pinch;
@@ -391,39 +555,12 @@ export class AirMouseController {
       return result;
     }
 
-    // Adaptive Tremor & Jitter Filter for Index Fingertip
-    let alpha = this.smoothing;
-    if (this.pointerMode === 'index') {
-      const dist = Math.hypot(observed.anchor.x - this.filtered.x, observed.anchor.y - this.filtered.y);
-      if (dist < 0.003) {
-        // Stationary hovering / micro-tremor: apply heavy smoothing to eliminate jitter
-        alpha = Math.min(this.smoothing * 0.35, 0.16);
-      } else if (dist < 0.012) {
-        // Transition zone
-        const t = (dist - 0.003) / (0.012 - 0.003);
-        alpha = Math.min(this.smoothing * 0.35, 0.16) + t * (this.smoothing - Math.min(this.smoothing * 0.35, 0.16));
-      } else {
-        // Fast intentional sweep: snappy zero lag
-        alpha = Math.max(this.smoothing, 0.65);
-      }
-    }
-
     const next = {
-      x:this.filtered.x + (observed.anchor.x - this.filtered.x) * alpha,
-      y:this.filtered.y + (observed.anchor.y - this.filtered.y) * alpha,
+      x:this.filtered.x + (observed.anchor.x - this.filtered.x) * this.smoothing,
+      y:this.filtered.y + (observed.anchor.y - this.filtered.y) * this.smoothing,
     };
     let rawDx = -(next.x - this.filtered.x) * this.sensitivity;
     let rawDy = (next.y - this.filtered.y) * this.sensitivity;
-    if (this.pointerMode === 'index') {
-      // Gain scaling: maps the comfortable chest/desk active box (~0.44 span) across full screen
-      rawDx *= 2.0;
-      rawDy *= 2.0;
-      // Sub-pixel deadband to stop 1px sensor twitch
-      if (Math.hypot(rawDx, rawDy) < 0.65) {
-        rawDx = 0;
-        rawDy = 0;
-      }
-    }
     this.filtered = next;
 
     // Cross-View coordinate rotation compensation (e.g. -22° for diagonal top-left webcam)
@@ -447,26 +584,15 @@ export class AirMouseController {
       const v = Math.hypot(dx, dy);
       let gain = 1.0;
       if (v < 2.5) {
-        gain = 0.55 + (v / 2.5) * 0.45; // Sub-pixel stabilization to dampen micro-tremors
+        gain = 0.55 + (v / 2.5) * 0.45;
       } else if (v > 7.0) {
-        gain = 1.0 + Math.min(2.5, Math.pow((v - 7.0) / 8.0, 1.25)); // Acceleration for effortless traversal
+        gain = 1.0 + Math.min(2.5, Math.pow((v - 7.0) / 8.0, 1.25));
       }
       dx *= gain;
       dy *= gain;
     }
 
-    // Click Jitter Lock: lock micro-displacement immediately following click
-    if (this.pointerMode === 'index') {
-      if (this.leftDown && !this.dragUnlocked) {
-        this.dragDisplacement += Math.hypot(dx, dy);
-        if (this.dragDisplacement < 14) {
-          dx = 0;
-          dy = 0;
-        } else {
-          this.dragUnlocked = true;
-        }
-      }
-    } else if (this.clickLock && this.mode === 'move' && !this.leftDown) {
+    if (this.clickLock && this.mode === 'move' && !this.leftDown) {
       if (dIndex < 0.48 && indexVelocity < -0.008) {
         dx *= 0.05;
         dy *= 0.05;
@@ -477,44 +603,25 @@ export class AirMouseController {
     }
 
     if (this.mode === 'scroll') {
-      if (this.pointerMode === 'index') {
-        // === Smartphone Touch Swipe Scroll ===
-        if (this.lastTouchY === null) {
-          this.lastTouchY = observed.anchor.y;
-        }
-        const motionY = observed.anchor.y - this.lastTouchY;
-        this.lastTouchY = observed.anchor.y;
-        if (Math.abs(motionY) > 0.0008) {
-          const scrollInput = -motionY * this.sensitivity * 1.6;
-          this.remaining.y += scrollInput;
-          const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
-          if (wheel) {
-            events.push({type:'scroll', dy:wheel});
-            this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
-          }
-        }
-      } else {
-        // Legacy palm scroll
-        if (this.scrollOriginY === null) {
-          this.scrollOriginY = observed.anchor.y;
-        }
-        const offsetY = observed.anchor.y - this.scrollOriginY;
-        let scrollInput = dy * 2;
-        if (Math.abs(offsetY) > 0.008) {
-          const rate = Math.sign(offsetY) * Math.min(18, Math.pow((Math.abs(offsetY) - 0.008) * 140, 1.25) * 4);
-          scrollInput += rate;
-        }
-        this.remaining.y += scrollInput;
-        const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
-        if (wheel) {
-          events.push({type:'scroll',dy:wheel});
-          this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
-        }
+      if (this.scrollOriginY === null) {
+        this.scrollOriginY = observed.anchor.y;
+      }
+      const offsetY = observed.anchor.y - this.scrollOriginY;
+      let scrollInput = dy * 2;
+      if (Math.abs(offsetY) > 0.008) {
+        const rate = Math.sign(offsetY) * Math.min(18, Math.pow((Math.abs(offsetY) - 0.008) * 140, 1.25) * 4);
+        scrollInput += rate;
+      }
+      this.remaining.y += scrollInput;
+      const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
+      if (wheel) {
+        events.push({type:'scroll',dy:wheel});
+        this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
       }
     } else {
       this.scrollOriginY = null;
       this.lastTouchY = null;
-      if (this.clickLock && this.mode === 'left' && this.leftDown && !this.dragUnlocked && this.pointerMode !== 'index') {
+      if (this.clickLock && this.mode === 'left' && this.leftDown && !this.dragUnlocked) {
         this.dragDisplacement += Math.hypot(dx, dy);
         if (this.dragDisplacement < 10) {
           dx = 0;

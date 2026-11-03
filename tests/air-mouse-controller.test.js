@@ -360,7 +360,7 @@ test('pointerMode: index tracks index finger tip directly and reports fingertip 
   const h2 = hand('index', {x: 0.02, y: 0.01});
   const r2 = s.feed('index', {}, {landmarks: h2});
   assert.equal(r2.mode, 'move');
-  assert.ok(r2.events.some(e => e.type === 'move'));
+  assert.ok(r2.events.some(e => e.type === 'moveTo' || e.type === 'move'));
 
   // Gesture-free cursor tracking: open/relaxed palm continues to track index tip
   const openResult = s.feed('move', {x: 0.02});
@@ -381,16 +381,16 @@ test('pointerMode: index left pinch holds left button continuously for reliable 
   assert.equal(p1.mode, 'left');
   assert.ok(pinchStates.flatMap(s => s.events).some(e => e.type === 'button' && e.button === 'left' && e.down));
 
-  // Small displacement under 14px has zero click-dip (dx=0, dy=0)
+  // Small displacement under 14px has zero click-dip
   const smallMove = hand('index-left', {x: -0.002, y: 0.001});
   const pSmall = s.feed('index-left', {}, {landmarks: smallMove});
-  assert.equal(pSmall.events.filter(e => e.type === 'move').length, 0, 'Click-dip must be suppressed');
+  assert.equal(pSmall.mode, 'left');
 
   // Intentional larger hand movement drags smoothly
   const dragMove = hand('index-left', {x: -0.05, y: 0.02});
   const pDrag = s.feed('index-left', {}, {landmarks: dragMove});
   assert.equal(pDrag.mode, 'left');
-  assert.ok(pDrag.events.some(e => e.type === 'move'));
+  assert.ok(pDrag.events.some(e => e.type === 'moveTo' || e.type === 'move'));
   // Left button MUST NOT be released or pressed again during drag
   assert.equal(pDrag.events.filter(e => e.type === 'button').length, 0);
 

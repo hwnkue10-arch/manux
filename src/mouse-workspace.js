@@ -320,7 +320,9 @@ export class MouseWorkspace {
       return {x: u * w, y: v * h};
     };
 
-    const idx = mapPoint(state.fingertips.index);
+    const idx = state.activePos
+      ? { x: state.activePos.x * w, y: state.activePos.y * h }
+      : mapPoint(state.fingertips.index);
     const thm = mapPoint(state.fingertips.thumb);
     const mid = mapPoint(state.fingertips.middle);
     const rng = state.fingertips.ring ? mapPoint(state.fingertips.ring) : null;
@@ -473,7 +475,18 @@ export class MouseWorkspace {
     if (!pad) return;
     for (const event of events) {
       if (event.type === 'release') { this.releasePractice(); continue; }
-      if (event.type === 'move') {
+      if (event.type === 'moveTo') {
+        this.position.x = clamp(event.x * pad.clientWidth, 0, pad.clientWidth - 2);
+        this.position.y = clamp(event.y * pad.clientHeight, 0, pad.clientHeight - 2);
+        if (this.drag) {
+          const target = this.$('#mouse-drag-target');
+          if (target) {
+            target.style.left = `${clamp(this.position.x - this.drag.x, 0, pad.clientWidth - target.offsetWidth)}px`;
+            target.style.top = `${clamp(this.position.y - this.drag.y, 0, pad.clientHeight - target.offsetHeight)}px`;
+          }
+        }
+        this.renderCursor();
+      } else if (event.type === 'move') {
         this.position.x = clamp(this.position.x + event.dx, 0, pad.clientWidth - 2);
         this.position.y = clamp(this.position.y + event.dy, 0, pad.clientHeight - 2);
         if (this.drag) {
