@@ -40,9 +40,9 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     dist2D(points[4], points[0]) > palm * 0.65;
 
   // Exclusive left and right pinch detection (prevents index dipping during middle pinch)
-  const isLeftPinch = reachable(8, 5) && dIndex < (previousPinch === 'left' ? 0.46 : 0.35) && dMiddle > dIndex * 1.15;
-  const isRightPinch = reachable(12, 9) && dMiddle < (previousPinch === 'right' ? 0.46 : 0.38) && dIndex > dMiddle * 1.18;
-  const isScrollPinch = reachable(16, 13) && dRing < (previousPinch === 'scroll' ? 0.46 : 0.35);
+  const isLeftPinch = reachable(8, 5) && dIndex < (previousPinch === 'left' ? 0.47 : 0.35) && dMiddle > dIndex * 1.15;
+  const isRightPinch = reachable(12, 9) && dMiddle < (previousPinch === 'right' ? 0.47 : 0.38) && dIndex > dMiddle * 1.18;
+  const isScrollPinch = reachable(16, 13) && dRing < (previousPinch === 'scroll' ? 0.47 : 0.35);
 
   const fingers = [
     {mode:'left', tip:8, base:5, pinch:isLeftPinch, ratio:dIndex, reachable:reachable(8, 5)},
@@ -54,11 +54,17 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     f.mode !== pinches[0].mode && f.reachable && f.ratio < 0.42));
   const pinch = ambiguous ? null : pinches[0]?.mode ?? null;
 
+  // Clenched fingers count: fingers curled tightly into palm
+  const clenchedCount = [8, 12, 16, 20].filter(tip => dist2D(points[tip], points[0]) < palm * 1.05).length;
+  // An intentional resting fist pose has at least 2 fingers clenched tight against palm
+  const isRestingFist = clenchedCount >= 2;
+
   // Two-Finger Clutch scroll (LM 8 & LM 12 touching, thumb unpinched) OR classic V-sign scroll
   const twoFingerClutch = allowVScroll && !ambiguous && !pinch && dIndex > 0.42 && dMiddle > 0.42 && dTwoFinger < 0.22;
   const vScroll = allowVScroll && !ambiguous && !pinch && ((index && middle && !ring && !pinky) || twoFingerClutch);
 
-  const mode = ambiguous ? 'idle' : pinch || (vScroll ? 'scroll' : ([index,middle,ring,pinky].filter(Boolean).length >= 3 ? 'move' : 'idle'));
+  // Pose-Free Tracking: cursor tracks freely in relaxed C-curve; rests only when hand is clenched
+  const mode = ambiguous ? 'idle' : pinch || (vScroll ? 'scroll' : (isRestingFist ? 'idle' : 'move'));
 
   // Rigid Palm Anchor: Wrist (0) 20%, Index MCP (5) 50%, Middle MCP (9) 30%
   const anchor = {
@@ -71,7 +77,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
 /** Pure landmark-to-input controller. It never sends OS events or stores camera data. */
 export class AirMouseController {
-  constructor({sensitivity = 1800, smoothing = 0.45, holdMs = 160, ballistics = false, clickLock = false, vScroll = false} = {}) {
+  constructor({sensitivity = 1800, smoothing = 0.45, holdMs = 160, ballistics = false, clickLock = false, vScroll = false, rotationDeg = 0, gainY = 1.0} = {}) {
     if (!Number.isFinite(sensitivity) || sensitivity < 100 || sensitivity > 6000 ||
         !Number.isFinite(smoothing) || smoothing <= 0 || smoothing > 1 ||
         !Number.isFinite(holdMs) || holdMs < 0 || holdMs > 2000) {
@@ -83,6 +89,8 @@ export class AirMouseController {
     this.ballistics = Boolean(ballistics);
     this.clickLock = Boolean(clickLock);
     this.vScroll = Boolean(vScroll);
+    this.rotationDeg = Number.isFinite(rotationDeg) ? rotationDeg : 0;
+    this.gainY = Number.isFinite(gainY) ? gainY : 1.0;
     this.reset();
   }
 
@@ -108,6 +116,8 @@ export class AirMouseController {
     this.dragDisplacement = 0;
     this.dragUnlocked = false;
     this.lastDIndex = null;
+    this.scrollOriginY = null;
+    this.leftReleaseFrames = 0;
     return this.state('disabled', [{type:'release'}]);
   }
 
@@ -125,6 +135,8 @@ export class AirMouseController {
     this.dragDisplacement = 0;
     this.dragUnlocked = false;
     this.lastDIndex = null;
+    this.scrollOriginY = null;
+    this.leftReleaseFrames = 0;
     if (disarm) this.armed = false;
     return this.state(phase, events);
   }
@@ -162,13 +174,22 @@ export class AirMouseController {
     } else this.releaseSince = null;
 
     const events = [];
-    if (this.leftDown && observed.mode !== 'left') {
-      events.push({type:'button',button:'left',down:false});
-      this.leftDown = false;
-      this.armed = false;
-      this.releaseSince = observed.unpinched ? now : null;
-      this.dragDisplacement = 0;
-      this.dragUnlocked = false;
+    if (this.leftDown) {
+      if (observed.mode !== 'left') {
+        // If fingers separated (dIndex >= 0.47), release immediately.
+        // If fingers are still touching (dIndex < 0.47), debounce for 4 frames to absorb tracking noise.
+        if (dIndex >= 0.47 || ++this.leftReleaseFrames >= 4) {
+          events.push({type:'button', button:'left', down:false});
+          this.leftDown = false;
+          this.armed = false;
+          this.releaseSince = observed.unpinched ? now : null;
+          this.dragDisplacement = 0;
+          this.dragUnlocked = false;
+          this.leftReleaseFrames = 0;
+        }
+      } else {
+        this.leftReleaseFrames = 0;
+      }
     }
     if (observed.mode === 'idle') {
       const releaseSince = this.releaseSince;
@@ -228,9 +249,25 @@ export class AirMouseController {
       x:this.filtered.x + (observed.anchor.x - this.filtered.x) * this.smoothing,
       y:this.filtered.y + (observed.anchor.y - this.filtered.y) * this.smoothing,
     };
-    let dx = -(next.x - this.filtered.x) * this.sensitivity;
-    let dy = (next.y - this.filtered.y) * this.sensitivity;
+    let rawDx = -(next.x - this.filtered.x) * this.sensitivity;
+    let rawDy = (next.y - this.filtered.y) * this.sensitivity;
     this.filtered = next;
+
+    // Cross-View coordinate rotation compensation (e.g. -22° for diagonal top-left webcam)
+    let dx = rawDx;
+    let dy = rawDy;
+    if (this.rotationDeg !== 0) {
+      const rad = (this.rotationDeg * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      dx = rawDx * cos - rawDy * sin;
+      dy = rawDx * sin + rawDy * cos;
+    }
+
+    // Anisotropic Y gain (compensates for foreshortening on desk plane)
+    if (this.gainY !== 1.0) {
+      dy *= this.gainY;
+    }
 
     // Ergonomic pointer ballistics
     if (this.ballistics && this.mode !== 'scroll') {
@@ -245,8 +282,8 @@ export class AirMouseController {
       dy *= gain;
     }
 
-    // Pre-Pinch Velocity Dampening (Click Dip Elimination)
-    if (this.clickLock && this.mode === 'move') {
+    // Pre-Pinch Velocity Dampening: ONLY when !this.leftDown before click down!
+    if (this.clickLock && this.mode === 'move' && !this.leftDown) {
       if (dIndex < 0.48 && indexVelocity < -0.008) {
         // Finger is closing rapidly toward thumb to click: freeze cursor on target!
         dx *= 0.05;
@@ -259,13 +296,24 @@ export class AirMouseController {
     }
 
     if (this.mode === 'scroll') {
-      this.remaining.y += dy * 2;
+      if (this.scrollOriginY === null) {
+        this.scrollOriginY = observed.anchor.y;
+      }
+      const offsetY = observed.anchor.y - this.scrollOriginY;
+      let scrollInput = dy * 2;
+      // Joystick continuous rate control when tilted beyond 0.008 deadzone
+      if (Math.abs(offsetY) > 0.008) {
+        const rate = Math.sign(offsetY) * Math.min(18, Math.pow((Math.abs(offsetY) - 0.008) * 140, 1.25) * 4);
+        scrollInput += rate;
+      }
+      this.remaining.y += scrollInput;
       const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
       if (wheel) {
         events.push({type:'scroll',dy:wheel});
         this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
       }
     } else {
+      this.scrollOriginY = null;
       // Click Jitter Lock: lock micro-displacement immediately following left-click down
       if (this.clickLock && this.mode === 'left' && this.leftDown && !this.dragUnlocked) {
         this.dragDisplacement += Math.hypot(dx, dy);

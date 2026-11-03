@@ -11,7 +11,16 @@ export class MouseWorkspace {
       const sensitivity = Number(this.$('#mouse-sensitivity')?.value ?? 1800);
       const ballistics = this.$('#mouse-ballistics') ? this.$('#mouse-ballistics').checked : true;
       const clickLock = this.$('#mouse-click-lock') ? this.$('#mouse-click-lock').checked : true;
-      return new AirMouseController({sensitivity, smoothing: 0.70, ballistics, clickLock, vScroll: true});
+      const crossView = this.$('#mouse-cross-view') ? this.$('#mouse-cross-view').checked : true;
+      return new AirMouseController({
+        sensitivity,
+        smoothing: 0.70,
+        ballistics,
+        clickLock,
+        vScroll: true,
+        rotationDeg: crossView ? -22 : 0,
+        gainY: crossView ? 2.2 : 1.0,
+      });
     };
     this.controller = createController();
     this.active = false; this.ready = false; this.enabled = false; this.available = false;
@@ -31,6 +40,7 @@ export class MouseWorkspace {
     this.$('#mouse-sensitivity')?.addEventListener('input', () => updateSettings('감도를 바꿨습니다. 제어를 다시 켜세요.'));
     this.$('#mouse-ballistics')?.addEventListener('change', () => updateSettings('포인터 가속도 설정을 바꿨습니다. 제어를 다시 켜세요.'));
     this.$('#mouse-click-lock')?.addEventListener('change', () => updateSettings('클릭 흔들림 방지 설정을 바꿨습니다. 제어를 다시 켜세요.'));
+    this.$('#mouse-cross-view')?.addEventListener('change', () => updateSettings('Cross-View 대각선 보정 설정을 바꿨습니다. 제어를 다시 켜세요.'));
 
     this.$('#mouse-click-target')?.addEventListener('click', () => {
       const el = this.$('#mouse-click-count'); if (el) el.textContent = String(Number(el.textContent) + 1);
