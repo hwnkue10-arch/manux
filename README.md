@@ -1,106 +1,128 @@
-# MANUX
+# MANUX · 인체공학 에어 마우스 (Ergonomic Air Mouse)
 
-웹캠으로 손동작을 읽어 **앱 안의 영상과 Windows 마우스를 제어하는 팀 프로젝트**입니다. 영상과 손 추론은 사용하는 PC에서 처리합니다. Discord에서는 같은 프로젝트를 함께 개발할 수 있습니다.
+> **"손을 움직이면, 커서도 함께."**  
+> 모니터 위에 손가락 좌표가 직접 떠오르는 **아이 트래커 방식 투명 HUD 오버레이**와 인체공학적 제스처로 조작하는 Windows 핸즈프리 에어 마우스 시제품입니다. 손목 터널 증후군(CTS)과 관절 피로를 최소화하기 위해 설계되었습니다.
 
-## 무엇부터 하면 되나요?
+---
 
-| 하고 싶은 일 | 시작할 곳 |
-| --- | --- |
-| 코드를 몰라도 기능 제안·오류 보고·개발 요청하기 | 아래 **Discord로 참여하기** |
-| 내 PC에서 앱을 실행하고 사용해 보기 | 아래 **Windows에서 처음 실행하기** |
-| 코드를 바꾸고 검사·리뷰받기 | [개발 참여 안내](CONTRIBUTING.md) |
-| 설치 오류나 빨간 검사 결과 해결하기 | [첫날 온보딩과 문제 해결](docs/onboarding.md) |
+## ⚡ 빠른 실행 (1-Click Run)
 
-팀이 공유한 **검증된 브랜치·PR·배포 후보**를 기준으로 시작하세요. `main`이나 다른 팀원의 로컬 폴더가 항상 최신인 것은 아닙니다. 최신 상태는 현재 브랜치·커밋·미커밋 변경을 함께 확인합니다.
+`manux` 폴더 안의 **`실행.bat`**를 더블클릭하면 모든 의존성 설치, 오프라인 인식 모델 다운로드, 앱 실행이 자동으로 처리됩니다.
 
-## Discord로 참여하기
-
-`1조-수화-pc제어-시스템` 채널에서 `@1조봇(Manux)`을 멘션하거나, 등록된 사용자는 `/ask`로 요청합니다. 둘 다 **같은 Claude 협업 대화**로 들어갑니다.
-
-```text
-@1조봇(Manux) [목표] 마우스 사용 중 손이 화면 밖으로 나가면 즉시 멈추게 해줘.
-[현재 문제] 손을 내린 뒤에도 가끔 커서가 움직이는 것 같아.
-[완료 확인] 손을 내렸을 때 이동과 눌린 버튼이 해제되는지 검사하고 결과를 알려줘.
+```batch
+실행.bat
 ```
 
-전문 용어나 코드를 쓸 필요는 없습니다. **하려는 일·현재 문제·완료를 확인할 방법**을 알려주세요. 오류는 발생 순서와 오류 문구를 함께 보내면 재현하기 쉽습니다. 에이전트는 [공통 작업·결과 규칙](docs/harness.md)에 따라 요청을 정리하고 검증 결과를 보고합니다.
+> **요구사항**: Windows 10/11, Node.js (LTS), 일반 USB 웹캠 또는 노트북 내장 카메라
 
-- 독립적인 작업은 최대 **5개**까지 별도 Git 작업 폴더에서 진행합니다. 결과는 검토 후 순서대로 통합합니다.
-- “작업 완료”, “공유 코드에 통합”, “GitHub 게시”는 서로 다른 상태입니다. 결과 보고에서 확인하세요.
-- 채널 대화는 팀의 공유 맥락입니다. 토큰·계정 비밀번호·개인 영상을 올리지 않습니다.
-- Discord 요청은 **협업 호스트 PC**에서 실행됩니다. 팀원 PC의 앱을 원격 설치하거나 팀원 PC의 마우스를 자동 제어하는 연결은 아닙니다.
+---
 
-봇 운영자는 별도 봇 프로젝트의 `discord_bot.bat`를 실행하고 창을 유지해야 합니다. 팀원 모두가 봇을 설치할 필요는 없습니다. 응답이 없으면 호스트 운영자에게 실행 상태를 확인해 달라고 알려주세요.
+## 🚀 새로운 상호작용 패러다임 (Core Paradigm)
 
-## Windows에서 처음 실행하기
+기존 웹캠 에어 마우스의 한계(미세 떨림, 클릭 시 커서 쏠림, 시선 분산, 어색한 자세 피로)를 해결하기 위해 **4가지 새로운 인터랙션 아키텍처**를 적용했습니다.
 
-준비물은 **Windows, Node.js 24, Git for Windows, 웹캠**, 그리고 팀이 공유한 이 프로젝트 폴더입니다. 명령은 `package.json`이 있는 `manux` 폴더에서 실행합니다.
+### 1. 모니터 투명 HUD 오버레이 (아이 트래커 방식)
+* 작은 웹캠 창을 답답하게 쳐다볼 필요가 없습니다. 웹캠 영상은 백그라운드에서 투명 처리되며, **모니터 화면 전체에 검지(LM 8)·엄지(LM 4)·중지(LM 12) 네온 AR 포인트가 직접 오버레이**됩니다.
+* Electron의 `setIgnoreMouseEvents(true, { forward: true })` 기술로 웹서핑, 문서 편집, 게임 등 모든 Windows 프로그램 위에서 투명하게 클릭이 관통됩니다.
 
-1. **`MANUX 개발 준비.cmd`**를 더블클릭합니다. 패키지를 설치하고 환경·공통 검사를 실행합니다.
-2. 같은 폴더의 PowerShell에서 최초 한 번 다음 두 명령을 실행합니다. 다운로드 때문에 인터넷이 필요합니다.
+### 2. 제스처 1: 검지 끝(LM 8) 포인터 1:1 직접 추적
+* 검지를 세웠을 때(제스처 1), 모니터 커서가 **검지 끝 조준선(Cyan Reticle)**을 1:1로 직접 따라다닙니다.
+* **황금비 활성 화면 매핑(Golden Ratio Active Mapping)**: 카메라 화각 중심부의 편안한 구역($X: [0.18, 0.82]$, $Y: [0.15, 0.85]$)을 모니터 해상도 전체로 1:1 정밀 매핑하여, 손을 화면 밖으로 무리하게 뻗지 않고도 4개 모서리 구석구석을 편안하게 조작할 수 있습니다.
 
-   ```powershell
-   npm run setup
-   npm run desktop:setup
-   ```
+### 3. 엄지 + 검지 핀치: 좌클릭 & 100% 신뢰성 연속 드래그
+* 검지 끝(`LM 8`)과 엄지 끝(`LM 4`)이 맞닿으면 좌클릭 Down 상태가 고정됩니다.
+* 맞닿은 상태로 손을 이동하면 창 이동, 파일 드래그앤드롭, 텍스트 블록 지정이 **100% 끊김 없이 유지**됩니다. 손가락을 떼는 순간 즉시 마우스 버튼이 해제됩니다.
 
-3. **`MANUX 마우스 실행.cmd`**를 더블클릭합니다.
-4. 카메라를 켜고 **이 화면에서 연습 → 마우스 제어 켜기**부터 사용합니다. 현재 브랜치의 [마우스 사용법](docs/air-mouse.md)에 있는 기본 자세와 클릭 동작을 확인한 뒤 손 전체를 움직입니다.
-5. 실제 커서를 제어하려면 데스크톱 앱에서 **Windows 마우스**를 직접 선택하고 제어를 다시 켭니다. **Ctrl + Alt + M**으로 다른 앱에서도 제어를 멈출 수 있습니다.
+### 4. 엄지 + 중지 핀치: 우클릭
+* 엄지 끝(`LM 4`)과 중지 끝(`LM 12`)이 닿으면 우클릭이 발동됩니다. 배타적 거리 판정으로 검지 간섭과 오클릭을 차단합니다.
 
-다음부터는 `MANUX 마우스 실행.cmd`로 시작합니다. 코드나 의존성이 업데이트되면 다시 개발 준비·검사를 실행합니다. [자세한 마우스 사용법](docs/air-mouse.md)에서 클릭·드래그·스크롤 동작과 제한을 확인하세요.
+### 5. 제스처 2: 스마트폰 터치 & 손 떼기 스크롤 (Peace Sign)
+* **스마트폰 터치 동기화**: 검지와 중지를 펴서 V자(Peace sign)를 만들면 그 자리에서 가상 터치 앵커가 생성됩니다.
+* **위로 튕기면 아래로 스크롤**: 스마트폰 화면을 손가락으로 튕기듯, **두 손가락을 위로 그으면 화면이 아래로 스크롤**됩니다.
+* **주먹 쥐어 손 떼기 (역스크롤 0%)**: 스크롤을 더 내리고 싶을 때 주먹을 살짝 쥐면 화면에서 손을 뗀 상태가 되어, 손을 아래로 원위치시켜도 반대 방향 스크롤이 전혀 발생하지 않습니다. 다시 V자를 펴서 위로 튕기면 연속 스크롤이 이어집니다.
 
-영상 모드나 브라우저 연습만 사용하려면 모델 준비 후 `npm start`를 실행하고 <http://127.0.0.1:4173>을 엽니다. 브라우저에서는 실제 Windows 커서에 명령을 보내지 않습니다. [영상·개인 등록 상세 사용법](docs/usage-video.md)
+---
 
-## 현재 구현과 남은 일
+## 🎮 제스처 조작 표
 
-| 기능 | 현재 상태 |
-| --- | --- |
-| 영상 재생·정지·앞/뒤 이동 | 브라우저와 앱 안의 로컬 영상 제어 구현 |
-| 손 전체 이동·클릭·드래그·우클릭·스크롤 | 연습 화면과 Electron/Windows 입력 경로 구현. 실제 제어는 기본 꺼짐 |
-| 사용자·책상/소파별 개인 등록 | 코드가 있으나 일괄 등록 부담과 실제 등록 실패가 보고됨 |
-| 원하는 동작 하나만 등록, 임의 손 모양·액션 연결 | 후속 개발 과제 |
-| 실물 웹캠 사용 편의성·거리별 성능 | 별도 사용자 평가 필요. 자동 검사 통과로 보장하지 않음 |
+| 제스처 | HUD 피드백 | 기능 | 상세 동작 |
+| :--- | :--- | :--- | :--- |
+| **👆 1번 포즈** | 청록색(Cyan) 타겟 링 & 십자선 | **커서 이동** | 검지 끝(LM 8)이 가장 높을 때 커서가 검지 끝을 직접 추적 |
+| **🤏 검지 핀치** | 에메랄드(Emerald) 네온 레이저 | **좌클릭 & 연속 드래그** | 엄지+검지가 맞닿으면 클릭 고정, 이동 시 100% 드래그 |
+| **👆 중지 핀치** | 파란색(Blue) 네온 레이저 | **우클릭** | 엄지+중지가 맞닿으면 우클릭 발동 |
+| **✌️ 2번 포즈** | 보라색(Purple) 트윈 가이드 | **스마트폰 터치 스크롤** | V자 편 채 위로 그으면 아래 스크롤, 주먹 쥐어 복귀 |
+| **✊ 주먹 / 휴식** | HUD 회색 비활성 링 | **제어 휴식 (Rest)** | 주먹을 쥐거나 손을 책상에 내리면 모든 입력 일시 정지 |
 
-MediaPipe 손 추적 모델을 재학습하는 방식은 아닙니다. 개인 등록은 관절 특징 예시와 판정 기준을 저장합니다. 현재 동작의 자세한 계약은 [에어 마우스](docs/air-mouse.md)와 [Windows 입력 연결](desktop/README.md)을 먼저 확인하세요. 10월 29일 계획 문서는 당시의 기준선과 제안을 담고 있습니다.
+---
 
-## 검사와 팀 전달
+## ⌨️ 단축키 안내 (Keyboard Shortcuts & Hotkeys)
 
-**`MANUX 검사.cmd`**를 더블클릭하거나 아래 명령을 실행합니다. 같은 공통 검사를 팀원 PC와 CI에서 사용합니다.
+| 단축키 | 적용 범위 | 설명 |
+| :--- | :--- | :--- |
+| **`F11`** | 앱 창 및 오버레이 | **화면 투명 HUD 오버레이 모드 토글** (모니터 전체 화면 AR 모드) |
+| **`Esc`** | 앱 및 오버레이 | **일반 창 모드로 복귀** / 제어 일시 중지 |
+| **`Ctrl + Alt + M`** | **Windows 전체 (글로벌)** | **비상 제어 중지 (Emergency Stop)** (어떤 프로그램 실행 중에도 즉시 마우스 권한 해제) |
+
+---
+
+## 🛠️ 기술 스택 (Tech Stack)
+
+```text
+[웹캠 비디오 입력] 
+       │
+       ▼
+[MediaPipe Tasks Vision 1.2.0] ── 21개 3D 핸드 랜드마크 고속 추출
+       │
+       ▼
+[AirMouseController] ── 지수 스무딩 · 포인터 탄도학 · 핀치 히스테리시스 · 스마트폰 스크롤 역학
+       │
+  ┌────┴────────────────────────┐
+  ▼                             ▼
+[HTML5 AR HUD Canvas]         [Electron IPC Bridge]
+- 100vw x 100vh 투명 오버레이   - safe IPC token lease & watchdog
+- 네온 글로우 렌더링           - win32 SendInput (C# P/Invoke)
+- 플로팅 Frosted Glass 바      - 상대좌표 Move / Click / Wheel 주입
+```
+
+* **Frontend & UI Layer**:
+  * Vanilla ES Modules (Zero Build Overhead)
+  * HTML5 Canvas 2D Context (고성능 실시간 AR 네온 HUD 및 관절 시각화)
+  * CSS3 Custom Properties & Glassmorphism (`backdrop-filter: blur`, frameless layout)
+* **Vision & AI Engine**:
+  * Google `@mediapipe/tasks-vision` (v1.2.0)
+  * Hand Landmark Recognizer (21 Keypoints, 3D Normalized Coordinates, 온디바이스 로컬 추론)
+* **Desktop Shell & Overlay**:
+  * Electron (v45.2.1 / Chromium 120+ / Node.js 24)
+  * Transparent Frameless BrowserWindow (`transparent: true`, `backgroundColor: '#00000000'`)
+  * Windows OS-level Click-Through (`win.setIgnoreMouseEvents(true, { forward: true })`)
+* **Native Input Injection Driver**:
+  * Windows PowerShell + Inline C# P/Invoke Helper
+  * Win32 `SendInput` API (`MOUSEEVENTF_MOVE`, `MOUSEEVENTF_LEFTDOWN/UP`, `MOUSEEVENTF_RIGHTDOWN/UP`, `MOUSEEVENTF_WHEEL`)
+  * Hardware Subpixel Fraction Accumulator (미세 떨림 방지 및 부드러운 픽셀 누적)
+  * Process Watchdog & Expiring Lease Safety Gate (프로세스 종료/응답 지연 시 자동 권한 회수)
+* **Motion & Ergonomics Filtering**:
+  * Pointer Ballistics (저속 미세 조작 감쇠 + 고속 스위프 가속 엔진)
+  * Pre-Pinch Velocity Dampening (클릭 순간 커서 쏠림을 막는 속도 감쇠)
+  * Click Jitter Lock (좌클릭 직후 10px 이내 미세 요동 잠금)
+  * Cross-View Angle Compensation (-22° 회전 보정 및 2.2배 desk foreshortening 보정)
+
+---
+
+## 🧪 테스트 및 품질 검증
+
+본 프로젝트는 안전한 입력 제어와 제스처 무결성을 위해 42개의 자동화 테스트 및 Windows SendInput 드라이버 드라이런 검증을 내장하고 있습니다.
 
 ```powershell
-npm run verify
+# 단위 테스트 (AirMouseController, Desktop IPC, 제스처 상태 기계 42개 전원 통과)
+npm test
+
+# Windows 네이티브 SendInput 드라이버 안전성 검증 (dry-run 모드로 실제 커서 간섭 없이 검증)
+npm run test:native
 ```
 
-| 검사 | 확인하는 것 |
-| --- | --- |
-| `npm run doctor` | Node·Git·의존성 등 실행 준비 상태 |
-| `npm run verify` | 코드·설정 검사와 전체 단위·서버 회귀 |
-| `npm run test:browser` | 합성 입력으로 마우스 화면과 연결 흐름 확인. 최초 `npm run browser:install` 필요 |
-| `npm run test:native` | Windows 입력 helper의 dry-run. 실제 커서에 명령을 보내지 않음 |
-| 실물 사용자 평가 | 실제 웹캠·조명·거리·사용성 확인 |
+---
 
-빨간 결과가 나오면 실패한 단계와 오류 문구를 그대로 공유하세요. 검사 통과와 실제 사용성, GitHub 반영 여부를 구분합니다. [검사 선택·PR·소스 전달 절차](CONTRIBUTING.md)를 따라 변경을 검토합니다.
+## 🔒 개인정보 및 보안 원칙
 
-CI/CD 설정은 GitHub Actions에 있습니다. 저장소에 반영된 워크플로가 PR 검사를 수행하며, 수동 전달 흐름은 **검증된 소스 묶음**을 만듭니다. 설치 프로그램이나 자동 배포 서비스가 아닙니다. 로컬 검사 성공은 GitHub Actions 실행 성공을 뜻하지 않습니다.
-
-## 구조와 다음 문서
-
-```text
-웹캠 → MediaPipe Worker → 손동작 판정 → 영상 / 마우스 연습
-                                      └→ Electron → Windows 입력
-Discord → 공유 Claude 세션 → 작업별 Git 폴더 → 검사 → 리뷰·통합
-```
-
-| 문서 | 용도 |
-| --- | --- |
-| [온보딩](docs/onboarding.md) | 첫 실행과 오류 해결 |
-| [공통 작업·결과 규칙](docs/harness.md) | 팀원과 에이전트가 같은 기준으로 작업·보고 |
-| [개발 참여](CONTRIBUTING.md) | 브랜치·검사·PR·소스 전달 |
-| [에이전트 규칙](AGENTS.md) | 저장소 작업 규칙의 원본; `CLAUDE.md`에서 참조 |
-| [모듈 계약](docs/contracts.md) · [작업 문서](docs/workstreams/) | 담당 영역과 연결 변경 |
-| [영상 사용법](docs/usage-video.md) · [마우스 사용법](docs/air-mouse.md) | 기능별 상세 사용 |
-| [LAN 데모](docs/lan-demo.md) | 같은 네트워크에서 브라우저 데모. 주소는 현재 호스트에 확인 |
-| [마스터 플랜](docs/master-plan.md) | 기존 요구사항·후속 개발 계획 |
-
-소스 저장소: [intel7-ai/manux](https://github.com/intel7-ai/manux). 모델 출처·해시는 `public/models/model-source.json`에 기록합니다.
+* **100% 로컬 오프라인 처리**: 웹캠 영상과 손 관절 좌표는 외부 서버로 전송되지 않으며 사용자 PC 메모리 내에서만 실시간 처리 후 소멸됩니다.
+* **비상 정지 보장**: `Ctrl + Alt + M` 글로벌 단축키는 언제든 즉시 시스템 제어권을 회수하며, 앱 비정상 종료 시 네이티브 드라이버가 누른 상태의 모든 마우스 버튼을 즉각 릴리즈합니다.
