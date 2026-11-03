@@ -467,4 +467,26 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('beforeunload', () => { stopCamera(); if (mediaUrl) URL.revokeObjectURL(mediaUrl); });
 renderProfiles(profiles[0]?.id || ''); syncMedia();
 switchMode(location.hash === '#media' ? 'media' : 'mouse');
+if (globalThis.manuxDesktop) {
+  setTimeout(() => {
+    if (!ready && !$('#camera-start')?.disabled) {
+      $('#camera-start')?.click();
+    }
+  }, 350);
+}
+$('#overlay-pip-btn')?.addEventListener('click', () => {
+  if (document.body.classList.contains('show-pip')) {
+    moveCameraPreview($('#overlay-pip-box'));
+  } else {
+    moveCameraPreview($('#camera-preview-home'));
+  }
+});
+$('#overlay-exit-btn')?.addEventListener('click', () => {
+  moveCameraPreview($('#camera-preview-home'));
+});
+window.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && document.body.classList.contains('overlay-mode')) {
+    moveCameraPreview($('#camera-preview-home'));
+  }
+});
 if (stored.error) message('#profile-message', `${stored.error} 기존 데이터를 보호하기 위해 새 저장을 멈췄습니다. 공통 모델은 사용할 수 있습니다.`, true);

@@ -12,7 +12,7 @@ function straight(a, b, c) {
   return length > 1e-8 && (u.x * v.x + u.y * v.y + u.z * v.z) / length < -0.70;
 }
 
-function observation(landmarks, width, height, previousPinch, allowVScroll = false) {
+function observation(landmarks, width, height, previousPinch, allowVScroll = false, pointerMode = 'index') {
   if (!Array.isArray(landmarks) || landmarks.length !== 21 || !Number.isFinite(width) ||
       !Number.isFinite(height) || width <= 0 || height <= 0) return null;
   if (!landmarks.every(p => p && Number.isFinite(p.x) && Number.isFinite(p.y) &&
@@ -22,67 +22,140 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const points = landmarks.map(p => ({x:p.x, y:p.y * height / width, z:p.z ?? 0}));
   const palm = Math.max(dist2D(points[0], points[9]), dist2D(points[5], points[17]));
   if (palm < 0.025 || palm > 0.8) return null;
+
   const extended = base => straight(points[base], points[base + 1], points[base + 3]) &&
     dist2D(points[base + 3], points[0]) > dist2D(points[base + 1], points[0]) * 1.12;
   const index = extended(5), middle = extended(9), ring = extended(13), pinky = extended(17);
-  const fingerExtensions = new Map([[5,index],[9,middle],[13,ring],[17,pinky]]);
   const ratio = tip => dist2D(points[4], points[tip]) / palm;
   const dIndex = ratio(8);
   const dMiddle = ratio(12);
   const dRing = ratio(16);
   const dTwoFinger = dist2D(points[8], points[12]) / palm;
 
-  const isFist = [8, 12, 16, 20].every(tip => dist2D(points[tip], points[0]) < palm * 1.05);
+  // Clenched fingers count: fingers curled tightly into palm
+  const clenchedCount = [8, 12, 16, 20].filter(tip => dist2D(points[tip], points[0]) < palm * 1.05).length;
+  const isFist = clenchedCount >= 2;
+
   // Reachable pinch tips must extend away from the wrist, and thumb must extend from wrist
   const reachable = (tip, base) => !isFist &&
-    dist2D(points[tip], points[0]) > palm * 1.0 &&
-    dist2D(points[tip], points[base]) > palm * 0.35 &&
-    dist2D(points[4], points[0]) > palm * 0.65;
+    dist2D(points[tip], points[0]) > palm * 0.95 &&
+    dist2D(points[tip], points[base]) > palm * 0.32 &&
+    dist2D(points[4], points[0]) > palm * 0.60;
 
   // Exclusive left and right pinch detection (prevents index dipping during middle pinch)
   const isLeftPinch = reachable(8, 5) && dIndex < (previousPinch === 'left' ? 0.47 : 0.35) && dMiddle > dIndex * 1.15;
   const isRightPinch = reachable(12, 9) && dMiddle < (previousPinch === 'right' ? 0.47 : 0.38) && dIndex > dMiddle * 1.18;
-  const isScrollPinch = reachable(16, 13) && dRing < (previousPinch === 'scroll' ? 0.47 : 0.35);
+  const isBothPinch = reachable(8, 5) && reachable(12, 9) && dIndex < 0.38 && dMiddle < 0.40;
+  const isRingScrollPinch = reachable(16, 13) && dRing < (previousPinch === 'scroll' ? 0.47 : 0.35);
 
-  const fingers = [
-    {mode:'left', tip:8, base:5, pinch:isLeftPinch, ratio:dIndex, reachable:reachable(8, 5)},
-    {mode:'right', tip:12, base:9, pinch:isRightPinch, ratio:dMiddle, reachable:reachable(12, 9)},
-    {mode:'scroll', tip:16, base:13, pinch:isScrollPinch, ratio:dRing, reachable:reachable(16, 13)},
-  ];
-  const pinches = fingers.filter(f => f.pinch);
-  const ambiguous = pinches.length > 1 || (pinches.length === 1 && fingers.some(f =>
-    f.mode !== pinches[0].mode && f.reachable && f.ratio < 0.42));
-  const pinch = ambiguous ? null : pinches[0]?.mode ?? null;
+  // Smartphone Touch Scroll (✌️ Gesture 2: Index & Middle extended upwards, Ring & Pinky folded)
+  // Or Two-Finger Clutch (LM 8 & LM 12 touching, thumb unpinched)
+  const isPeaceGesture = index && middle && !ring && !pinky && dIndex > 0.38 && dMiddle > 0.40;
+  const twoFingerClutch = !isBothPinch && !isLeftPinch && !isRightPinch && dIndex > 0.42 && dMiddle > 0.42 && dTwoFinger < 0.22;
+  const isSmartphoneScroll = allowVScroll && (isPeaceGesture || twoFingerClutch);
 
-  // Clenched fingers count: fingers curled tightly into palm
-  const clenchedCount = [8, 12, 16, 20].filter(tip => dist2D(points[tip], points[0]) < palm * 1.05).length;
-  // An intentional resting fist pose has at least 2 fingers clenched tight against palm
-  const isRestingFist = clenchedCount >= 2;
+  // Gesture 1 (Pointing Pose): Index tip is extended highest (smallest y)
+  const isIndexHighest = index && (points[8].y < points[12].y - 0.015) &&
+    (points[8].y < points[16].y) && (points[8].y < points[20].y);
 
-  // Two-Finger Clutch scroll (LM 8 & LM 12 touching, thumb unpinched) OR classic V-sign scroll
-  const twoFingerClutch = allowVScroll && !ambiguous && !pinch && dIndex > 0.42 && dMiddle > 0.42 && dTwoFinger < 0.22;
-  const vScroll = allowVScroll && !ambiguous && !pinch && ((index && middle && !ring && !pinky) || twoFingerClutch);
+  let mode = 'idle';
+  let pinch = null;
+  let anchor = null;
 
-  // Pose-Free Tracking: cursor tracks freely in relaxed C-curve; rests only when hand is clenched
-  const mode = ambiguous ? 'idle' : pinch || (vScroll ? 'scroll' : (isRestingFist ? 'idle' : 'move'));
+  if (pointerMode === 'index') {
+    // === NEW PARADIGM: Index Tip Pointer + Continuous Left Drag + Peace Touch Scroll ===
+    if (isBothPinch) {
+      mode = 'left';
+      pinch = 'left';
+    } else if (isLeftPinch) {
+      mode = 'left';
+      pinch = 'left';
+    } else if (isRightPinch) {
+      mode = 'right';
+      pinch = 'right';
+    } else if (isSmartphoneScroll) {
+      mode = 'scroll';
+      pinch = null;
+    } else if (isIndexHighest || (index && !isFist)) {
+      mode = 'move';
+      pinch = null;
+    } else {
+      mode = 'idle';
+      pinch = null;
+    }
 
-  // Rigid Palm Anchor: Wrist (0) 20%, Index MCP (5) 50%, Middle MCP (9) 30%
-  const anchor = {
-    x: 0.2 * points[0].x + 0.5 * points[5].x + 0.3 * points[9].x,
-    y: 0.2 * points[0].y + 0.5 * points[5].y + 0.3 * points[9].y,
+    if (mode === 'scroll') {
+      // Touch anchor is midpoint between index and middle tips
+      anchor = {
+        x: (points[8].x + points[12].x) * 0.5,
+        y: (points[8].y + points[12].y) * 0.5,
+      };
+    } else if (mode === 'left') {
+      // During left pinch/drag, anchor is index tip or midpoint with thumb
+      anchor = {
+        x: points[8].x * 0.7 + points[4].x * 0.3,
+        y: points[8].y * 0.7 + points[4].y * 0.3,
+      };
+    } else {
+      // Cursor follows Index Fingertip (LM 8) directly!
+      anchor = {
+        x: points[8].x,
+        y: points[8].y,
+      };
+    }
+  } else {
+    // === LEGACY PARADIGM: Open Palm Move + Rigid Palm Anchor ===
+    const fingers = [
+      {mode:'left', tip:8, base:5, pinch:isLeftPinch, ratio:dIndex, reachable:reachable(8, 5)},
+      {mode:'right', tip:12, base:9, pinch:isRightPinch, ratio:dMiddle, reachable:reachable(12, 9)},
+      {mode:'scroll', tip:16, base:13, pinch:isRingScrollPinch, ratio:dRing, reachable:reachable(16, 13)},
+    ];
+    const pinches = fingers.filter(f => f.pinch);
+    const ambiguous = pinches.length > 1 || (pinches.length === 1 && fingers.some(f =>
+      f.mode !== pinches[0].mode && f.reachable && f.ratio < 0.42));
+    pinch = ambiguous ? null : pinches[0]?.mode ?? null;
+
+    const vScroll = allowVScroll && !ambiguous && !pinch && (isPeaceGesture || twoFingerClutch);
+    mode = ambiguous ? 'idle' : pinch || (vScroll ? 'scroll' : (isFist ? 'idle' : 'move'));
+
+    // Rigid Palm Anchor: Wrist (0) 20%, Index MCP (5) 50%, Middle MCP (9) 30%
+    anchor = {
+      x: 0.2 * points[0].x + 0.5 * points[5].x + 0.3 * points[9].x,
+      y: 0.2 * points[0].y + 0.5 * points[5].y + 0.3 * points[9].y,
+    };
+  }
+
+  // Golden ratio active zone mapping coordinates (0 ~ 1 normalized across comfortable desk view)
+  // Mirror x so moving right in front of webcam moves right on monitor
+  const mirroredX = 1.0 - (points[8].x);
+  const activePos = {
+    x: clamp((mirroredX - 0.18) / 0.64, 0, 1),
+    y: clamp((points[8].y - 0.15) / 0.70, 0, 1),
   };
 
-  return {mode, pinch, anchor, vScroll, dIndex, dMiddle, unpinched:!ambiguous && fingers.every(f => !f.reachable || f.ratio >= 0.44)};
+  const fingertips = {
+    index: {x: points[8].x, y: points[8].y},
+    thumb: {x: points[4].x, y: points[4].y},
+    middle: {x: points[12].x, y: points[12].y},
+    ring: {x: points[16].x, y: points[16].y},
+    pinky: {x: points[20].x, y: points[20].y},
+    wrist: {x: points[0].x, y: points[0].y},
+  };
+
+  const unpinched = dIndex >= 0.44 && dMiddle >= 0.44;
+
+  return {mode, pinch, anchor, vScroll: isSmartphoneScroll, dIndex, dMiddle, dTwoFinger, palm, fingertips, activePos, unpinched};
 }
 
 /** Pure landmark-to-input controller. It never sends OS events or stores camera data. */
 export class AirMouseController {
-  constructor({sensitivity = 1800, smoothing = 0.45, holdMs = 160, ballistics = false, clickLock = false, vScroll = false, rotationDeg = 0, gainY = 1.0} = {}) {
+  constructor({pointerMode = 'palm', sensitivity = 1800, smoothing = 0.45, holdMs = 160, ballistics = false, clickLock = false, vScroll = false, rotationDeg = 0, gainY = 1.0} = {}) {
     if (!Number.isFinite(sensitivity) || sensitivity < 100 || sensitivity > 6000 ||
         !Number.isFinite(smoothing) || smoothing <= 0 || smoothing > 1 ||
         !Number.isFinite(holdMs) || holdMs < 0 || holdMs > 2000) {
       throw new RangeError('Invalid air mouse sensitivity, smoothing, or hold time.');
     }
+    this.pointerMode = pointerMode;
     this.sensitivity = sensitivity;
     this.smoothing = smoothing;
     this.holdMs = holdMs;
@@ -94,8 +167,16 @@ export class AirMouseController {
     this.reset();
   }
 
-  state(phase, events = [], progress = 0) {
-    return {mode:this.mode, phase, progress:clamp(progress, 0, 1), events};
+  state(phase, events = [], progress = 0, extras = {}) {
+    return {
+      mode:this.mode,
+      phase,
+      progress:clamp(progress, 0, 1),
+      events,
+      fingertips:this.lastFingertips ?? null,
+      activePos:this.lastActivePos ?? null,
+      ...extras
+    };
   }
 
   reset() {
@@ -117,7 +198,10 @@ export class AirMouseController {
     this.dragUnlocked = false;
     this.lastDIndex = null;
     this.scrollOriginY = null;
+    this.lastTouchY = null;
     this.leftReleaseFrames = 0;
+    this.lastFingertips = null;
+    this.lastActivePos = null;
     return this.state('disabled', [{type:'release'}]);
   }
 
@@ -136,7 +220,10 @@ export class AirMouseController {
     this.dragUnlocked = false;
     this.lastDIndex = null;
     this.scrollOriginY = null;
+    this.lastTouchY = null;
     this.leftReleaseFrames = 0;
+    this.lastFingertips = null;
+    this.lastActivePos = null;
     if (disarm) this.armed = false;
     return this.state(phase, events);
   }
@@ -151,11 +238,13 @@ export class AirMouseController {
     if (this.lastTime !== null && now <= this.lastTime) return this.state('stale');
     const gap = this.lastTime !== null && now - this.lastTime > MAX_GAP_MS;
     this.lastTime = now;
-    const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll) : null;
+    const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll, this.pointerMode) : null;
     if (!observed) {
       this.lastHand = null;
       return this.interrupt('invalid');
     }
+    this.lastFingertips = observed.fingertips;
+    this.lastActivePos = observed.activePos;
     const changedHand = handedness && this.lastHand && handedness !== this.lastHand;
     this.lastHand = handedness;
     if (gap || changedHand) return this.interrupt('tracking-reset');
@@ -296,24 +385,46 @@ export class AirMouseController {
     }
 
     if (this.mode === 'scroll') {
-      if (this.scrollOriginY === null) {
-        this.scrollOriginY = observed.anchor.y;
-      }
-      const offsetY = observed.anchor.y - this.scrollOriginY;
-      let scrollInput = dy * 2;
-      // Joystick continuous rate control when tilted beyond 0.008 deadzone
-      if (Math.abs(offsetY) > 0.008) {
-        const rate = Math.sign(offsetY) * Math.min(18, Math.pow((Math.abs(offsetY) - 0.008) * 140, 1.25) * 4);
-        scrollInput += rate;
-      }
-      this.remaining.y += scrollInput;
-      const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
-      if (wheel) {
-        events.push({type:'scroll',dy:wheel});
-        this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
+      if (this.pointerMode === 'index') {
+        // === Smartphone Touch Swipe Scroll ===
+        // Moving 2 fingers UP (observed.anchor.y decreases) scrolls DOWN (positive wheel).
+        // Moving 2 fingers DOWN (observed.anchor.y increases) scrolls UP (negative wheel).
+        if (this.lastTouchY === null) {
+          this.lastTouchY = observed.anchor.y;
+        }
+        const motionY = observed.anchor.y - this.lastTouchY;
+        this.lastTouchY = observed.anchor.y;
+        if (Math.abs(motionY) > 0.0008) {
+          const scrollInput = -motionY * this.sensitivity * 1.6;
+          this.remaining.y += scrollInput;
+          const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
+          if (wheel) {
+            events.push({type:'scroll', dy:wheel});
+            this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
+          }
+        }
+      } else {
+        // Legacy palm scroll
+        if (this.scrollOriginY === null) {
+          this.scrollOriginY = observed.anchor.y;
+        }
+        const offsetY = observed.anchor.y - this.scrollOriginY;
+        let scrollInput = dy * 2;
+        // Joystick continuous rate control when tilted beyond 0.008 deadzone
+        if (Math.abs(offsetY) > 0.008) {
+          const rate = Math.sign(offsetY) * Math.min(18, Math.pow((Math.abs(offsetY) - 0.008) * 140, 1.25) * 4);
+          scrollInput += rate;
+        }
+        this.remaining.y += scrollInput;
+        const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
+        if (wheel) {
+          events.push({type:'scroll',dy:wheel});
+          this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
+        }
       }
     } else {
       this.scrollOriginY = null;
+      this.lastTouchY = null;
       // Click Jitter Lock: lock micro-displacement immediately following left-click down
       if (this.clickLock && this.mode === 'left' && this.leftDown && !this.dragUnlocked) {
         this.dragDisplacement += Math.hypot(dx, dy);
@@ -335,6 +446,12 @@ export class AirMouseController {
         this.remaining.y = clamp(this.remaining.y - py, -0.999, 0.999);
       }
     }
-    return this.state('active', events, 1);
+    return this.state('active', events, 1, {
+      fingertips: observed.fingertips,
+      activePos: observed.activePos,
+      dIndex: observed.dIndex,
+      dMiddle: observed.dMiddle,
+      dTwoFinger: observed.dTwoFinger
+    });
   }
 }

@@ -1,10 +1,11 @@
-import {app, BrowserWindow, ipcMain, globalShortcut, powerMonitor, dialog} from 'electron';
+import {app, BrowserWindow, screen, ipcMain, globalShortcut, powerMonitor, dialog} from 'electron';
 import {fileURLToPath} from 'node:url';
 import {createServer} from '../server.js';
 import {MouseBridge} from './mouse-bridge.mjs';
 import {isAppDocument, canRequestCamera, canCheckCamera, readDesktopPort} from './security.mjs';
 
 let window, server, origin, bridge, shortcutReady = false;
+let normalBounds = {width:1460, height:1000, x:undefined, y:undefined};
 const emergencyKey = 'Control+Alt+M';
 const appStatus = () => ({...bridge.status(), available:bridge.status().available && shortcutReady,
   error:shortcutReady ? bridge.status().error : 'Ctrl+Alt+M 정지 키를 등록하지 못했습니다. 다른 앱의 단축키 설정을 확인하세요.'});
@@ -29,9 +30,10 @@ else {
     origin = `http://127.0.0.1:${server.address().port}`;
     bridge = new MouseBridge();
     shortcutReady = globalShortcut.register(emergencyKey, () => bridge.disable('Ctrl+Alt+M으로 마우스 제어를 멈췄습니다.'));
-    window = new BrowserWindow({width:1460, height:1040, minWidth:760, minHeight:620,
+    window = new BrowserWindow({width:1460, height:1000, minWidth:760, minHeight:620,
       show:process.env.MANUX_MOUSE_DRY_RUN !== '1',
-      title:'MANUX · Air Mouse', backgroundColor:'#F5F7F3', autoHideMenuBar:true,
+      title:'MANUX · Air Mouse', frame:false, transparent:true, backgroundColor:'#00000000', hasShadow:false,
+      autoHideMenuBar:true,
       webPreferences:{preload:fileURLToPath(new URL('./preload.cjs', import.meta.url)),
         nodeIntegration:false, contextIsolation:true, sandbox:true, webSecurity:true,
         backgroundThrottling:false, spellcheck:false}});
@@ -70,6 +72,39 @@ else {
       bridge.send(payload.events, {generation:payload.generation, sentAt:payload.sentAt});
     });
     ipcMain.on('manux:mouse-stop', event => { if (trusted(event)) bridge.disable(); });
+    ipcMain.handle('manux:set-overlay', (event, active) => {
+      if (!trusted(event)) throw new Error('Untrusted sender.');
+      if (active) {
+        normalBounds = window.getBounds();
+        const display = screen.getDisplayNearestPoint({x:normalBounds.x, y:normalBounds.y}) || screen.getPrimaryDisplay();
+        window.setBounds(display.bounds);
+        window.setAlwaysOnTop(true, 'screen-saver');
+        window.setIgnoreMouseEvents(true, {forward:true});
+      } else {
+        window.setAlwaysOnTop(false);
+        window.setIgnoreMouseEvents(false);
+        if (normalBounds.width) window.setBounds(normalBounds);
+        else { window.setSize(1460, 1000); window.center(); }
+      }
+      return {overlay:Boolean(active)};
+    });
+    ipcMain.on('manux:set-ignore-mouse', (event, ignore) => {
+      if (trusted(event) && window && !window.isDestroyed()) {
+        window.setIgnoreMouseEvents(Boolean(ignore), {forward:true});
+      }
+    });
+    ipcMain.on('manux:window-minimize', event => {
+      if (trusted(event) && window && !window.isDestroyed()) window.minimize();
+    });
+    ipcMain.on('manux:window-maximize', event => {
+      if (trusted(event) && window && !window.isDestroyed()) {
+        if (window.isMaximized()) window.unmaximize();
+        else window.maximize();
+      }
+    });
+    ipcMain.on('manux:window-close', event => {
+      if (trusted(event) && window && !window.isDestroyed()) window.close();
+    });
     bridge.on('status', statusToWindow);
     powerMonitor.on('suspend', () => bridge.disable('절전 모드에서 마우스 제어를 해제했습니다.'));
     powerMonitor.on('lock-screen', () => bridge.disable('화면이 잠겨 마우스 제어를 해제했습니다.'));

@@ -32,4 +32,9 @@ contextBridge.exposeInMainWorld('manuxDesktop', {
     ipcRenderer.on('manux:mouse-status', handler);
     return () => ipcRenderer.removeListener('manux:mouse-status', handler);
   },
+  setOverlay: async (active) => ipcRenderer.invoke('manux:set-overlay', Boolean(active)),
+  setIgnoreMouse: (ignore) => ipcRenderer.send('manux:set-ignore-mouse', Boolean(ignore)),
+  minimize: () => ipcRenderer.send('manux:window-minimize'),
+  maximize: () => ipcRenderer.send('manux:window-maximize'),
+  close: () => ipcRenderer.send('manux:window-close'),
 });

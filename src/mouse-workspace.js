@@ -1,18 +1,30 @@
 import {AirMouseController} from './air-mouse-controller.js';
 
-const LABELS = {idle:'쉬는 중', move:'커서 이동', left:'좌클릭 · 드래그', right:'우클릭', scroll:'스크롤'};
+const LABELS = {
+  idle:'쉬는 중 (주먹/휴식)',
+  move:'👆 포인터 이동 (제스처 1)',
+  left:'🤏 좌클릭 · 드래그 중',
+  right:'👆 우클릭',
+  scroll:'✌️ 폰 터치 스크롤 (제스처 2)',
+  both:'🤏 좌우 동시 클릭'
+};
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 /** Practice actions are confined to the pad; only the desktop preload can control Windows. */
 export class MouseWorkspace {
   constructor({root = document, bridge = globalThis.manuxDesktop} = {}) {
-    this.root = root; this.bridge = bridge; this.$ = selector => root.querySelector(selector);
+    this.root = root;
+    this.bridge = bridge;
+    this.$ = selector => root.querySelector(selector);
+
     const createController = () => {
       const sensitivity = Number(this.$('#mouse-sensitivity')?.value ?? 1800);
+      const pointerMode = this.$('#mouse-pointer-mode')?.value ?? 'index';
       const ballistics = this.$('#mouse-ballistics') ? this.$('#mouse-ballistics').checked : true;
       const clickLock = this.$('#mouse-click-lock') ? this.$('#mouse-click-lock').checked : true;
       const crossView = this.$('#mouse-cross-view') ? this.$('#mouse-cross-view').checked : true;
       return new AirMouseController({
+        pointerMode,
         sensitivity,
         smoothing: 0.70,
         ballistics,
@@ -22,13 +34,31 @@ export class MouseWorkspace {
         gainY: crossView ? 2.2 : 1.0,
       });
     };
+
     this.controller = createController();
-    this.active = false; this.ready = false; this.enabled = false; this.available = false;
-    this.generation = 0; this.pending = false; this.lastFrame = null;
-    this.position = {x:130, y:110}; this.pressed = false; this.drag = null; this.clickStart = null;
+    this.active = false;
+    this.ready = false;
+    this.enabled = false;
+    this.available = false;
+    this.overlayActive = false;
+    this.generation = 0;
+    this.pending = false;
+    this.lastFrame = null;
+    this.position = {x:130, y:110};
+    this.pressed = false;
+    this.drag = null;
+    this.clickStart = null;
+
+    this.overlayCanvas = this.$('#overlay-hud-canvas');
+    this.overlayCtx = this.overlayCanvas?.getContext('2d');
+
     this.$('#mouse-enabled')?.addEventListener('change', () => { void this.toggle(); });
     this.$('#mouse-stop')?.addEventListener('click', () => this.stop('마우스 제어를 껐습니다.'));
     this.$('#mouse-target')?.addEventListener('change', () => { this.stop(); this.renderTarget(); });
+    this.$('#mouse-pointer-mode')?.addEventListener('change', () => {
+      this.stop('추적 방식을 변경했습니다.');
+      this.controller = createController();
+    });
 
     const updateSettings = (msg) => {
       this.stop(msg);
@@ -46,28 +76,124 @@ export class MouseWorkspace {
       const el = this.$('#mouse-click-count'); if (el) el.textContent = String(Number(el.textContent) + 1);
     });
     this.$('#mouse-scroll-area')?.addEventListener('scroll', () => this.renderScroll());
+
+    // Window controls & Overlay triggers
+    this.$('#btn-enter-overlay')?.addEventListener('click', () => void this.toggleOverlay(true));
+    this.$('#btn-quick-overlay')?.addEventListener('click', () => void this.toggleOverlay(!this.overlayActive));
+    this.$('#overlay-exit-btn')?.addEventListener('click', () => void this.toggleOverlay(false));
+    this.$('#overlay-stop-btn')?.addEventListener('click', () => {
+      this.stop('마우스 제어를 껐습니다.');
+      void this.toggleOverlay(false);
+    });
+    this.$('#overlay-pip-btn')?.addEventListener('click', () => {
+      document.body.classList.toggle('show-pip');
+    });
+
+    const hudPill = this.$('#overlay-hud-pill');
+    hudPill?.addEventListener('mouseenter', () => {
+      if (this.overlayActive && this.bridge) this.bridge.setIgnoreMouse(false);
+    });
+    hudPill?.addEventListener('mouseleave', () => {
+      if (this.overlayActive && this.bridge) this.bridge.setIgnoreMouse(true);
+    });
+
+    this.$('#btn-win-min')?.addEventListener('click', () => this.bridge?.minimize());
+    this.$('#btn-win-max')?.addEventListener('click', () => this.bridge?.maximize());
+    this.$('#btn-win-close')?.addEventListener('click', () => this.bridge?.close());
+
+    window.addEventListener('keydown', event => {
+      if (event.key === 'F11') {
+        event.preventDefault();
+        void this.toggleOverlay(!this.overlayActive);
+      } else if (event.key === 'Escape' && this.overlayActive) {
+        event.preventDefault();
+        void this.toggleOverlay(false);
+      }
+    });
+
     this.unsubscribe = bridge?.onStatus(status => {
       this.available = Boolean(status.available);
       if (this.enabled && !status.enabled && this.desktop) this.stop(status.error || 'Windows 마우스 제어가 중지되었습니다.');
       this.renderTarget(); this.refresh();
       if (status.error && !this.enabled) this.status(status.error, true);
     });
-    if (bridge) bridge.getStatus().then(status => {
-      this.available = Boolean(status.available); this.renderTarget();
-      if (status.error) this.status(status.error, true);
-    }).catch(error => this.status(`데스크톱 연결 실패: ${error.message}`, true));
-    // A timer may stop stalled inference, but must never refresh the native input lease.
+
+    if (bridge) {
+      bridge.getStatus().then(status => {
+        this.available = Boolean(status.available);
+        this.renderTarget();
+        if (status.error) this.status(status.error, true);
+      }).catch(error => this.status(`데스크톱 연결 실패: ${error.message}`, true));
+    }
+
     this.watchdog = setInterval(() => {
       if (this.enabled && this.lastFrame !== null && performance.now() - this.lastFrame > 700) {
         this.stop('손 추적 응답이 멈춰 제어를 껐습니다. 카메라를 확인하고 다시 켜세요.');
       }
     }, 100);
-    this.renderTarget(); this.renderCursor(); this.refresh();
+
+    this.renderTarget();
+    this.renderCursor();
+    this.refresh();
   }
 
   get desktop() { return this.$('#mouse-target')?.value === 'desktop'; }
-  get backgroundAllowed() { return this.active && this.enabled && this.desktop && this.available; }
-  status(text, error = false) { const el = this.$('#mouse-status'); if (el) { el.textContent = text; el.classList.toggle('error', error); } }
+  get backgroundAllowed() { return (this.active || this.overlayActive) && this.enabled && this.desktop && this.available; }
+
+  async toggleOverlay(active) {
+    if (this.overlayActive === active) return;
+    this.overlayActive = Boolean(active);
+    document.body.classList.toggle('overlay-mode', this.overlayActive);
+
+    const titlebarOverlayBtn = this.$('#btn-quick-overlay');
+    if (titlebarOverlayBtn) {
+      titlebarOverlayBtn.textContent = this.overlayActive ? '🖥️ 창 모드로 복귀 (Esc)' : '✨ 화면 투명 HUD 오버레이 (F11)';
+    }
+
+    if (this.bridge?.setOverlay) {
+      try {
+        await this.bridge.setOverlay(this.overlayActive);
+      } catch (err) {
+        console.error('Failed to set overlay:', err);
+      }
+    }
+
+    if (this.overlayActive) {
+      // Auto-enable mouse control in overlay mode if ready
+      if (this.ready && !this.enabled) {
+        const toggleEl = this.$('#mouse-enabled');
+        if (toggleEl) {
+          toggleEl.checked = true;
+          await this.toggle();
+        }
+      }
+      this.resizeOverlayCanvas();
+    } else {
+      if (this.overlayCtx && this.overlayCanvas) {
+        this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+      }
+    }
+  }
+
+  resizeOverlayCanvas() {
+    if (!this.overlayCanvas) return;
+    const w = window.innerWidth, h = window.innerHeight;
+    if (this.overlayCanvas.width !== w || this.overlayCanvas.height !== h) {
+      this.overlayCanvas.width = w;
+      this.overlayCanvas.height = h;
+    }
+  }
+
+  status(text, error = false) {
+    const el = this.$('#mouse-status');
+    if (el) { el.textContent = text; el.classList.toggle('error', error); }
+    const titlebarStatus = this.$('#titlebar-status');
+    if (titlebarStatus) {
+      titlebarStatus.textContent = this.enabled ? '제어 중' : '대기';
+      titlebarStatus.className = `status-pill ${this.enabled ? 'on' : error ? 'error' : ''}`;
+    }
+  }
+
   refresh() {
     const enabledEl = this.$('#mouse-enabled');
     if (enabledEl) {
@@ -77,6 +203,7 @@ export class MouseWorkspace {
     const targetEl = this.$('#mouse-target');
     if (targetEl) targetEl.disabled = this.pending;
   }
+
   renderTarget() {
     const option = this.$('#mouse-target option[value="desktop"]');
     if (option) {
@@ -94,16 +221,19 @@ export class MouseWorkspace {
     const pad = this.$('#mouse-pad');
     if (pad) pad.hidden = this.desktop;
   }
+
   setReady(ready) {
     this.ready = ready;
     if (!ready) this.stop('카메라를 시작한 뒤 마우스 제어를 켜세요.');
-    else if (!this.enabled) this.status('준비됐습니다. 제어를 켠 뒤 손바닥을 펴세요.');
+    else if (!this.enabled) this.status('준비됐습니다. 제어를 켠 뒤 검지를 펴세요.');
     this.refresh();
   }
+
   setActive(active) {
     this.stop(); this.active = active; this.refresh();
-    if (active) this.status(this.ready ? '제어를 켠 뒤 손바닥을 펴세요.' : '카메라를 시작한 뒤 마우스 제어를 켜세요.');
+    if (active) this.status(this.ready ? '제어를 켠 뒤 검지를 펴세요.' : '카메라를 시작한 뒤 마우스 제어를 켜세요.');
   }
+
   async toggle() {
     if (!this.$('#mouse-enabled')?.checked) { this.stop('마우스 제어를 껐습니다.'); return; }
     if (!this.ready || !this.active) { this.stop(); return; }
@@ -118,49 +248,207 @@ export class MouseWorkspace {
       }
       if (generation !== this.generation || !this.ready || !this.active) return;
       this.controller.reset(); this.enabled = true; this.lastFrame = performance.now();
-      this.status('손바닥을 펴고 손 전체를 움직이세요. 손가락을 붙여 클릭·스크롤로 전환합니다.');
+      this.status('👆 검지를 펴 포인터를 이동하세요. 엄지+검지 핀치는 좌클릭·드래그, ✌️ 폰 스크롤입니다.');
     } catch (error) { this.stop(error.message); }
     finally { this.pending = false; this.refresh(); }
   }
+
   stop(text) {
     this.generation++; this.enabled = false; this.lastFrame = null;
     this.controller.reset(); this.releasePractice(); this.bridge?.stop();
     const menu = this.$('#mouse-context-menu'); if (menu) menu.hidden = true;
     const modeEl = this.$('#mouse-mode'); if (modeEl) modeEl.textContent = '대기 중';
+    const badgeEl = this.$('#overlay-mode-badge'); if (badgeEl) badgeEl.textContent = '대기 중';
     this.root.querySelectorAll('[data-mouse-mode]').forEach(el => el.classList.remove('active'));
     this.refresh(); if (text) this.status(text);
+    if (this.overlayCtx && this.overlayCanvas) {
+      this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+    }
   }
+
   update({landmarks, now, quality, handedness, width, height, latency = 0}) {
-    if (!this.active) return null;
+    if (!this.active && !this.overlayActive) return null;
     if (this.enabled && latency > 450) this.stop('추적 결과가 늦어 제어를 껐습니다. 해상도를 낮추고 다시 켜보세요.');
     const state = this.controller.update({landmarks, now, quality, handedness, width, height, enabled:this.enabled});
     if (this.enabled) {
       this.lastFrame = performance.now();
-      if (this.desktop) this.bridge.send(state.events);
+      if (this.desktop) this.bridge?.send(state.events);
       else this.applyPractice(state.events);
       const hints = {
-        'release-required':'손가락을 떼고 손바닥을 잠깐 펴면 클릭을 다시 사용할 수 있습니다.',
+        'release-required':'손가락을 떼면 클릭을 다시 사용할 수 있습니다.',
         invalid:'손 전체가 카메라에 보이도록 해주세요.',
         holding:'손 모양을 확인하고 있습니다.',
         'tracking-reset':'손 위치를 다시 잡았습니다. 천천히 움직여주세요.',
       };
-      this.status(hints[state.phase] || (state.mode === 'idle' ? '쉬는 중입니다. 손바닥을 펴면 커서가 움직입니다.' : (state.mode === 'scroll' ? '스크롤 중 · 손을 위아래로 움직이세요.' : `${LABELS[state.mode]} 중 · 손 전체를 움직이세요.`)));
+      this.status(hints[state.phase] || (state.mode === 'idle' ? '쉬는 중입니다 (주먹/휴식).' : (state.mode === 'scroll' ? '✌️ 폰 터치 스크롤 중 · 손을 위아래로 그으세요.' : `${LABELS[state.mode] || state.mode} 중`)));
     }
-    const modeEl = this.$('#mouse-mode'); if (modeEl) modeEl.textContent = this.enabled ? LABELS[state.mode] : '대기 중';
+
+    const labelText = this.enabled ? (LABELS[state.mode] || state.mode) : '대기 중';
+    const modeEl = this.$('#mouse-mode'); if (modeEl) modeEl.textContent = labelText;
+    const badgeEl = this.$('#overlay-mode-badge'); if (badgeEl) badgeEl.textContent = labelText;
+
     const panel = this.$('#mouse-panel');
     if (panel) {
       panel.dataset.mode = state.mode;
       panel.dataset.phase = state.phase;
     }
     this.root.querySelectorAll('[data-mouse-mode]').forEach(el => el.classList.toggle('active', this.enabled && el.dataset.mouseMode === state.mode));
+
+    // Render AR HUD points on overlay canvas
+    if (this.overlayActive) {
+      this.renderOverlayHUD(state);
+    }
+
     return state;
   }
+
+  renderOverlayHUD(state) {
+    if (!this.overlayCtx || !this.overlayCanvas) return;
+    this.resizeOverlayCanvas();
+    const ctx = this.overlayCtx;
+    const w = this.overlayCanvas.width;
+    const h = this.overlayCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    if (!state?.fingertips) return;
+
+    // Golden Ratio active zone mapping to screen pixels
+    const mapPoint = pt => {
+      const mirroredX = 1.0 - pt.x;
+      const u = clamp((mirroredX - 0.18) / 0.64, 0, 1);
+      const v = clamp((pt.y - 0.15) / 0.70, 0, 1);
+      return {x: u * w, y: v * h};
+    };
+
+    const idx = mapPoint(state.fingertips.index);
+    const thm = mapPoint(state.fingertips.thumb);
+    const mid = mapPoint(state.fingertips.middle);
+
+    // Connecting laser line between Thumb and Index during left pinch / drag
+    if (state.mode === 'left') {
+      ctx.save();
+      ctx.strokeStyle = '#10b981';
+      ctx.lineWidth = 4;
+      ctx.shadowColor = '#10b981';
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.moveTo(thm.x, thm.y);
+      ctx.lineTo(idx.x, idx.y);
+      ctx.stroke();
+
+      ctx.fillStyle = '#10b981';
+      ctx.font = 'bold 12px "Segoe UI", sans-serif';
+      ctx.fillText('🤏 DRAGGING', (thm.x + idx.x) / 2 + 15, (thm.y + idx.y) / 2);
+      ctx.restore();
+    }
+
+    // Connecting laser line between Thumb and Middle during right pinch
+    if (state.mode === 'right') {
+      ctx.save();
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 4;
+      ctx.shadowColor = '#3b82f6';
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.moveTo(thm.x, thm.y);
+      ctx.lineTo(mid.x, mid.y);
+      ctx.stroke();
+
+      ctx.fillStyle = '#3b82f6';
+      ctx.font = 'bold 12px "Segoe UI", sans-serif';
+      ctx.fillText('👆 RIGHT CLICK', (thm.x + mid.x) / 2 + 15, (thm.y + mid.y) / 2);
+      ctx.restore();
+    }
+
+    // Twin stream guides during Smartphone Touch Scroll
+    if (state.mode === 'scroll') {
+      ctx.save();
+      ctx.strokeStyle = '#c084fc';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([4, 4]);
+      ctx.shadowColor = '#c084fc';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.moveTo(idx.x, idx.y);
+      ctx.lineTo(mid.x, mid.y);
+      ctx.stroke();
+
+      ctx.fillStyle = '#c084fc';
+      ctx.font = 'bold 12px "Segoe UI", sans-serif';
+      ctx.fillText('✌️ TOUCH SCROLL', (idx.x + mid.x) / 2 + 15, (idx.y + mid.y) / 2 - 10);
+      ctx.restore();
+    }
+
+    // Thumb Point (Amber Glow)
+    ctx.save();
+    ctx.fillStyle = '#f59e0b';
+    ctx.shadowColor = '#f59e0b';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(thm.x, thm.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fef3c7';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(thm.x, thm.y, 12, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // Middle Point (Purple Glow)
+    ctx.save();
+    ctx.fillStyle = '#a855f7';
+    ctx.shadowColor = '#a855f7';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(mid.x, mid.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#f3e8ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(mid.x, mid.y, 12, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // Index Point (Cyan Glowing Reticle - Active Pointer Cursor)
+    ctx.save();
+    const isPointerActive = state.mode === 'move' || state.mode === 'left';
+    ctx.fillStyle = isPointerActive ? '#00f0ff' : '#64748b';
+    ctx.shadowColor = isPointerActive ? '#00f0ff' : '#00000000';
+    ctx.shadowBlur = isPointerActive ? 18 : 0;
+    ctx.beginPath();
+    ctx.arc(idx.x, idx.y, 7, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = isPointerActive ? '#22d3ee' : '#94a3b8';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(idx.x, idx.y, 18, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Crosshair ticks
+    const r1 = 12, r2 = 24;
+    ctx.beginPath();
+    ctx.moveTo(idx.x - r2, idx.y); ctx.lineTo(idx.x - r1, idx.y);
+    ctx.moveTo(idx.x + r1, idx.y); ctx.lineTo(idx.x + r2, idx.y);
+    ctx.moveTo(idx.x, idx.y - r2); ctx.lineTo(idx.x, idx.y - r1);
+    ctx.moveTo(idx.x, idx.y + r1); ctx.lineTo(idx.x, idx.y + r2);
+    ctx.stroke();
+
+    if (isPointerActive) {
+      ctx.fillStyle = '#00f0ff';
+      ctx.font = '600 11px "Segoe UI", sans-serif';
+      ctx.fillText('INDEX [LM8]', idx.x + 22, idx.y - 12);
+    }
+    ctx.restore();
+  }
+
   hit(selector) {
     const pad = this.$('#mouse-pad')?.getBoundingClientRect(), rect = this.$(selector)?.getBoundingClientRect();
     if (!pad || !rect) return false;
     const x = pad.left + this.position.x, y = pad.top + this.position.y;
     return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
   }
+
   applyPractice(events) {
     const pad = this.$('#mouse-pad');
     if (!pad) return;
@@ -209,11 +497,13 @@ export class MouseWorkspace {
       }
     }
   }
+
   releasePractice() {
     this.pressed = false; this.drag = null; this.clickStart = null;
     this.$('#mouse-drag-target')?.classList.remove('dragging');
     this.renderCursor();
   }
+
   renderCursor() {
     const el = this.$('#mouse-cursor');
     if (el) {
@@ -221,6 +511,7 @@ export class MouseWorkspace {
       el.classList.toggle('pressed', this.pressed);
     }
   }
+
   renderScroll() {
     const el = this.$('#mouse-scroll-value');
     const area = this.$('#mouse-scroll-area');

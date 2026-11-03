@@ -344,3 +344,78 @@ test('pre-pinch velocity dampening suppresses cursor drift while fingers are clo
   const dx = damped.events.find(e => e.type === 'move')?.dx ?? 0;
   assert.ok(Math.abs(dx) < 10, `Expected damped dx < 10, got ${dx}`);
 });
+
+test('pointerMode: index tracks index finger tip directly and reports fingertip HUD data', () => {
+  const s = session({pointerMode:'index', smoothing:1});
+  const r1 = s.hold('move');
+  assert.ok(r1[0].fingertips?.index);
+  assert.ok(r1[0].fingertips?.thumb);
+  assert.ok(r1[0].fingertips?.middle);
+  assert.ok(r1[0].activePos);
+  assert.ok(r1[0].activePos.x >= 0 && r1[0].activePos.x <= 1);
+  assert.ok(r1[0].activePos.y >= 0 && r1[0].activePos.y <= 1);
+
+  // Moving index tip moves cursor
+  const h2 = hand('move', {x: 0.02, y: 0.01});
+  const r2 = s.feed('move', {}, {landmarks: h2});
+  assert.equal(r2.mode, 'move');
+  assert.ok(r2.events.some(e => e.type === 'move'));
+});
+
+test('pointerMode: index left pinch holds left button continuously for reliable drag and drop', () => {
+  const s = session({pointerMode:'index', smoothing:1});
+  s.hold('move');
+
+  // Pinch index and thumb
+  const pinchStates = s.hold('left');
+  const p1 = pinchStates.at(-1);
+  assert.equal(p1.mode, 'left');
+  assert.ok(pinchStates.flatMap(s => s.events).some(e => e.type === 'button' && e.button === 'left' && e.down));
+
+  // Move while pinched (Drag)
+  const pinchMove = hand('left', {x: -0.02, y: 0.01});
+  const p2 = s.feed('left', {}, {landmarks: pinchMove});
+  assert.equal(p2.mode, 'left');
+  assert.ok(p2.events.some(e => e.type === 'move'));
+  // Left button MUST NOT be released or pressed again during drag
+  assert.equal(p2.events.filter(e => e.type === 'button').length, 0);
+
+  // Release fingers
+  const openHand = hand('move');
+  const p3 = s.feed('move', {}, {landmarks: openHand});
+  assert.ok(p3.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
+});
+
+test('pointerMode: index smartphone touch swipe scrolls down when swiping up, and fist lifts touch', () => {
+  const s = session({pointerMode:'index', vScroll:true, smoothing:1});
+  s.hold('move');
+
+  const makeV = (transform = {}) => {
+    const h = hand('move', transform);
+    h[16].y = h[14].y + 0.05;
+    h[20].y = h[18].y + 0.05;
+    return h;
+  };
+
+  // Touch Down in peace gesture (2 fingers extended)
+  for (let i = 0; i < 4; i++) s.feed('move', {}, {landmarks: makeV()});
+  const touchDown = s.feed('move', {}, {landmarks: makeV()});
+  assert.equal(touchDown.mode, 'scroll');
+
+  // Swipe UP (Y decreases: y: -0.03) -> page scrolls DOWN (positive scroll dy)
+  const swipeUp = s.feed('move', {}, {landmarks: makeV({y: -0.03})});
+  assert.equal(swipeUp.mode, 'scroll');
+  const scrollEvent = swipeUp.events.find(e => e.type === 'scroll');
+  assert.ok(scrollEvent, 'Expected scroll event during swipe up');
+  assert.ok(scrollEvent.dy > 0, `Expected downward scroll (positive dy) when flicking up, got ${scrollEvent.dy}`);
+
+  // Touch Lift: curling hand into fist acts as lifting finger off glass
+  const lift = s.feed('fist', {}, {landmarks: hand('fist')});
+  assert.equal(lift.mode, 'idle');
+  // Zero scroll events on touch lift
+  assert.equal(lift.events.filter(e => e.type === 'scroll').length, 0);
+
+  // Moving hand down while in fist produces NO reverse scroll!
+  const fistDown = s.feed('fist', {}, {landmarks: hand('fist', {y: 0.05})});
+  assert.equal(fistDown.events.filter(e => e.type === 'scroll').length, 0);
+});
