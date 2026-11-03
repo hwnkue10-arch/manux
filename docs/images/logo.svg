@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="70%" stop-color="#020617" />
+      <stop offset="100%" stop-color="#000000" />
+    </radialGradient>
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06B6D4" />
+      <stop offset="50%" stop-color="#3B82F6" />
+      <stop offset="100%" stop-color="#8B5CF6" />
+    </linearGradient>
+    <linearGradient id="laserCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22D3EE" />
+      <stop offset="100%" stop-color="#06B6D4" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <circle cx="120" cy="120" r="110" fill="url(#bgGlow)" stroke="#1E293B" stroke-width="3" />
+  
+  <!-- Outer Glow Ring -->
+  <circle cx="120" cy="120" r="102" fill="none" stroke="url(#ringGrad)" stroke-width="4" opacity="0.9" filter="url(#glow)" />
+  <circle cx="120" cy="120" r="95" fill="none" stroke="#38BDF8" stroke-width="1" stroke-dasharray="6,4" opacity="0.6" />
+
+  <!-- Cybernetic Hand Skeleton (Stylized) -->
+  <g transform="translate(120, 130)">
+    <!-- Palm / Wrist Base -->
+    <path d="M -30 45 L 30 45 L 25 15 L -25 15 Z" fill="#1E293B" stroke="#334155" stroke-width="2" />
+    <circle cx="0" cy="45" r="4" fill="#06B6D4" />
+
+    <!-- Index Finger (Extended Upwards) -->
+    <line x1="-10" y1="15" x2="-12" y2="-15" stroke="url(#laserCyan)" stroke-width="5" stroke-linecap="round" />
+    <line x1="-12" y1="-15" x2="-14" y2="-45" stroke="url(#laserCyan)" stroke-width="5" stroke-linecap="round" />
+    <line x1="-14" y1="-45" x2="-15" y2="-72" stroke="#22D3EE" stroke-width="4.5" stroke-linecap="round" filter="url(#glow)" />
+    
+    <circle cx="-10" cy="15" r="3.5" fill="#38BDF8" />
+    <circle cx="-12" cy="-15" r="3.5" fill="#38BDF8" />
+    <circle cx="-14" cy="-45" r="3.5" fill="#38BDF8" />
+
+    <!-- Middle Finger (Bent / Neutral) -->
+    <line x1="8" y1="15" x2="10" y2="-5" stroke="#475569" stroke-width="4.5" stroke-linecap="round" />
+    <line x1="10" y1="-5" x2="18" y2="10" stroke="#475569" stroke-width="4" stroke-linecap="round" />
+    <circle cx="8" cy="15" r="3" fill="#64748B" />
+    <circle cx="10" cy="-5" r="3" fill="#64748B" />
+    <circle cx="18" cy="10" r="3" fill="#10B981" />
+
+    <!-- Thumb (Opposition towards middle) -->
+    <line x1="-25" y1="25" x2="-22" y2="0" stroke="#475569" stroke-width="4.5" stroke-linecap="round" />
+    <line x1="-22" y1="0" x2="-5" y2="10" stroke="#475569" stroke-width="4" stroke-linecap="round" />
+    <circle cx="-25" cy="25" r="3" fill="#64748B" />
+    <circle cx="-22" cy="0" r="3" fill="#64748B" />
+    <circle cx="-5" cy="10" r="3" fill="#10B981" />
+
+    <!-- Ring & Pinky (Folded into fist) -->
+    <line x1="22" y1="20" x2="25" y2="10" stroke="#334155" stroke-width="3.5" stroke-linecap="round" />
+    <line x1="25" y1="10" x2="22" y2="25" stroke="#334155" stroke-width="3.5" stroke-linecap="round" />
+    
+    <!-- Target Reticle at Index Tip -->
+    <circle cx="-15" cy="-72" r="14" fill="none" stroke="#22D3EE" stroke-width="2.5" filter="url(#glow)" />
+    <circle cx="-15" cy="-72" r="5" fill="#FFFFFF" filter="url(#glow)" />
+    <line x1="-15" y1="-92" x2="-15" y2="-80" stroke="#22D3EE" stroke-width="2" />
+    <line x1="-15" y1="-64" x2="-15" y2="-52" stroke="#22D3EE" stroke-width="2" />
+    <line x1="-35" y1="-72" x2="-23" y2="-72" stroke="#22D3EE" stroke-width="2" />
+    <line x1="-7" y1="-72" x2="5" y2="-72" stroke="#22D3EE" stroke-width="2" />
+  </g>
+</svg>
