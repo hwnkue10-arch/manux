@@ -27,7 +27,10 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     dist2D(points[base + 3], points[0]) > dist2D(points[base + 1], points[0]) * 1.12;
   const index = extended(5), middle = extended(9), ring = extended(13), pinky = extended(17);
   const ratio = tip => dist2D(points[4], points[tip]) / palm;
-  const dIndex = ratio(8);
+  const dIndexTip = ratio(8);
+  const dIndexDIP = dist2D(points[4], points[7]) / palm;
+  // Multi-point index touch in index mode: tip-to-tip pinch OR index DIP trigger tap (zero index movement!)
+  const dIndex = pointerMode === 'index' ? Math.min(dIndexTip, dIndexDIP * 1.05) : dIndexTip;
   const dMiddle = ratio(12);
   const dRing = ratio(16);
   const dTwoFinger = dist2D(points[8], points[12]) / palm;
@@ -54,32 +57,52 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const twoFingerClutch = !isBothPinch && !isLeftPinch && !isRightPinch && dIndex > 0.42 && dMiddle > 0.42 && dTwoFinger < 0.22;
   const isSmartphoneScroll = allowVScroll && (isPeaceGesture || twoFingerClutch);
 
-  // Gesture 1 (Pointing Pose): Index tip is extended highest (smallest y)
-  const isIndexHighest = index && (points[8].y < points[12].y - 0.015) &&
-    (points[8].y < points[16].y) && (points[8].y < points[20].y);
+  // Thumb extended outward (for Pistol/Trigger click gesture)
+  const thumbOut = dist2D(points[4], points[5]) > palm * 0.90 && dist2D(points[4], points[9]) > palm * 1.05;
 
   let mode = 'idle';
   let pinch = null;
   let anchor = null;
 
   if (pointerMode === 'index') {
-    // === NEW PARADIGM: Index Tip Pointer + Continuous Left Drag + Peace Touch Scroll ===
-    if (isBothPinch) {
-      mode = 'left';
-      pinch = 'left';
-    } else if (isLeftPinch) {
-      mode = 'left';
-      pinch = 'left';
-    } else if (isRightPinch) {
+    // === NEW PARADIGM: Strict Gesture 1, Zero Click-Dip Pinch/Pistol, Peace Scroll, Everything else = Rest ===
+
+    // 1. Gesture 2: Smartphone Touch Scroll (Index + Middle extended, Ring + Pinky curled, Thumb unpinched)
+    const isScrollGesture = allowVScroll && index && middle && !ring && !pinky && dIndex > 0.38 && dMiddle > 0.38;
+
+    // 2. Right Click:
+    //    Thumb + Middle pinch, BUT Middle MUST be extended away from palm (NOT curled into a fist!)
+    const middleNotCurled = dist2D(points[12], points[0]) > palm * 0.95 && dist2D(points[12], points[9]) > palm * 0.33;
+    const isRightPinchValid = middleNotCurled && dMiddle < (previousPinch === 'right' ? 0.44 : 0.34) && dIndex > dMiddle * 1.25;
+
+    // 3. Left Click & Drag:
+    //    Trigger A: Index + Thumb pinch (tip-to-tip OR trigger tap to index joint; works whether middle/ring/pinky are curled in a fist or not!)
+    //    Trigger B: Pistol / Gun pose (index extended, middle/ring/pinky curled, thumb popped out)
+    const isPinchLeft = !isRightPinchValid && dIndex < (previousPinch === 'left' ? 0.48 : 0.38) &&
+      dist2D(points[4], points[0]) > palm * 0.40 &&
+      (dMiddle > dIndex * 1.15 || !middle);
+    const isPistolLeft = index && !middle && !ring && !pinky && thumbOut && dIndex > 0.45;
+    const isLeft = isPinchLeft || isPistolLeft;
+
+    // 4. Strict Gesture 1 (Pointing / Cursor Move):
+    //    ONLY when index is extended, and middle, ring, pinky are ALL curled!
+    //    And thumb is NOT in a click pose (not pinching, not pistol)
+    const isStrictGesture1 = index && !middle && !ring && !pinky && !thumbOut && dIndex >= 0.38;
+
+    if (isRightPinchValid) {
       mode = 'right';
       pinch = 'right';
-    } else if (isSmartphoneScroll) {
+    } else if (isLeft) {
+      mode = 'left';
+      pinch = 'left';
+    } else if (isScrollGesture) {
       mode = 'scroll';
       pinch = null;
-    } else if (isIndexHighest || (index && !isFist)) {
+    } else if (isStrictGesture1) {
       mode = 'move';
       pinch = null;
     } else {
+      // 0 (Fist), 3, 4, 5 (Open Palm), or any other shape -> 100% IDLE (Rest)!
       mode = 'idle';
       pinch = null;
     }
@@ -91,10 +114,10 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
         y: (points[8].y + points[12].y) * 0.5,
       };
     } else if (mode === 'left') {
-      // During left pinch/drag, anchor is index tip or midpoint with thumb
+      // Cursor stays on index tip for zero click-dip
       anchor = {
-        x: points[8].x * 0.7 + points[4].x * 0.3,
-        y: points[8].y * 0.7 + points[4].y * 0.3,
+        x: points[8].x,
+        y: points[8].y,
       };
     } else {
       // Cursor follows Index Fingertip (LM 8) directly!
@@ -173,6 +196,7 @@ export class AirMouseController {
       phase,
       progress:clamp(progress, 0, 1),
       events,
+      pinch:this.pinch ?? null,
       fingertips:this.lastFingertips ?? null,
       activePos:this.lastActivePos ?? null,
       ...extras
@@ -222,8 +246,6 @@ export class AirMouseController {
     this.scrollOriginY = null;
     this.lastTouchY = null;
     this.leftReleaseFrames = 0;
-    this.lastFingertips = null;
-    this.lastActivePos = null;
     if (disarm) this.armed = false;
     return this.state(phase, events);
   }
@@ -234,13 +256,17 @@ export class AirMouseController {
       return this.state('disabled');
     }
     this.enabled = true;
-    if (!Number.isFinite(now)) return this.interrupt('invalid');
+    if (!Number.isFinite(now)) {
+      this.lastFingertips = this.lastActivePos = null;
+      return this.interrupt('invalid');
+    }
     if (this.lastTime !== null && now <= this.lastTime) return this.state('stale');
     const gap = this.lastTime !== null && now - this.lastTime > MAX_GAP_MS;
     this.lastTime = now;
     const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll, this.pointerMode) : null;
     if (!observed) {
       this.lastHand = null;
+      this.lastFingertips = this.lastActivePos = null;
       return this.interrupt('invalid');
     }
     this.lastFingertips = observed.fingertips;
@@ -310,9 +336,15 @@ export class AirMouseController {
     }
     this.observations++;
     if (this.mode !== observed.mode) {
-      const progress = this.holdMs === 0 ? 1 : (now - this.candidateSince) / this.holdMs;
+      const targetHoldMs = (this.pointerMode === 'index' && (observed.mode === 'left' || observed.mode === 'right'))
+        ? Math.min(this.holdMs, 60)
+        : this.holdMs;
+      const minObs = (this.pointerMode === 'index' && (observed.mode === 'left' || observed.mode === 'right'))
+        ? 2
+        : MIN_OBSERVATIONS;
+      const progress = targetHoldMs === 0 ? 1 : (now - this.candidateSince) / targetHoldMs;
       this.anchor = this.filtered = observed.anchor;
-      if (progress < 1 || this.observations < MIN_OBSERVATIONS) return this.state('holding', events, progress);
+      if (progress < 1 || this.observations < minObs) return this.state('holding', events, progress);
       this.mode = observed.mode;
       if (this.mode === 'left') {
         events.push({type:'button', button:'left', down:true});
@@ -371,8 +403,24 @@ export class AirMouseController {
       dy *= gain;
     }
 
-    // Pre-Pinch Velocity Dampening: ONLY when !this.leftDown before click down!
-    if (this.clickLock && this.mode === 'move' && !this.leftDown) {
+    // Pre-Pinch Velocity Dampening & Zero Click-Dip Freeze
+    if (this.pointerMode === 'index') {
+      if (this.mode === 'move' && !this.leftDown) {
+        if (dIndex < 0.48) {
+          // Finger is closing toward thumb to click: freeze cursor on target!
+          dx = 0;
+          dy = 0;
+        }
+      } else if (this.mode === 'left' && !this.dragUnlocked) {
+        this.dragDisplacement += Math.hypot(dx, dy);
+        if (this.dragDisplacement < 16) {
+          dx = 0;
+          dy = 0;
+        } else {
+          this.dragUnlocked = true;
+        }
+      }
+    } else if (this.clickLock && this.mode === 'move' && !this.leftDown) {
       if (dIndex < 0.48 && indexVelocity < -0.008) {
         // Finger is closing rapidly toward thumb to click: freeze cursor on target!
         dx *= 0.05;
@@ -425,8 +473,8 @@ export class AirMouseController {
     } else {
       this.scrollOriginY = null;
       this.lastTouchY = null;
-      // Click Jitter Lock: lock micro-displacement immediately following left-click down
-      if (this.clickLock && this.mode === 'left' && this.leftDown && !this.dragUnlocked) {
+      // Click Jitter Lock: lock micro-displacement immediately following left-click down (legacy palm mode)
+      if (this.clickLock && this.mode === 'left' && this.leftDown && !this.dragUnlocked && this.pointerMode !== 'index') {
         this.dragDisplacement += Math.hypot(dx, dy);
         if (this.dragDisplacement < 10) {
           dx = 0;
