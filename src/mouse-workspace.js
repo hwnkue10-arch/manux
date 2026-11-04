@@ -483,9 +483,6 @@ export class MouseWorkspace {
       }
       ctx.restore();
     }
-      ctx.fillText('INDEX [LM8]', idx.x + 22, idx.y - 12);
-    }
-    ctx.restore();
   }
 
   hit(selector) {

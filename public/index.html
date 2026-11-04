@@ -15,6 +15,11 @@
     <button id="btn-win-close" type="button" class="titlebar-btn close" title="닫기">✕</button>
   </div>
 </div>
+<script>
+  document.getElementById('btn-win-close')?.addEventListener('click', () => window.manuxDesktop?.close?.());
+  document.getElementById('btn-win-min')?.addEventListener('click', () => window.manuxDesktop?.minimize?.());
+  document.getElementById('btn-win-max')?.addEventListener('click', () => window.manuxDesktop?.maximize?.());
+</script>
 
 <canvas id="overlay-hud-canvas"></canvas>
 <div id="overlay-hud-pill">
