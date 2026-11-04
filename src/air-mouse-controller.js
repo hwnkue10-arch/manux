@@ -102,7 +102,16 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     y: (isIndexLike ? clamp(p.y, 0, 1) : p.y) * height / width,
     z: p.z ?? 0
   }));
-  const palm = Math.max(dist2D(points[0], points[9]), dist2D(points[5], points[17]));
+  // Z-Damped distance: monocular depth is scaled by 0.45 to prevent monocular depth noise jitter
+  const distZDamped = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, ((a.z ?? 0) - (b.z ?? 0)) * 0.45);
+
+  // Multi-axis 3D Palm Scale: invariant to Pitch, Yaw, and Foreshortening
+  const palm = Math.max(
+    distZDamped(points[0], points[9]),
+    distZDamped(points[5], points[17]),
+    dist2D(points[0], points[9]),
+    dist2D(points[5], points[17])
+  );
   if (palm < 0.025 || palm > 0.8) return null;
   const palmScale = palm;
 
@@ -128,20 +137,33 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   // vHat: 손목(0) -> 중지 너클(9) 원위 축 (+v = 손가락 펴짐, -v = 손목/손바닥 방향 말림)
   // uHat: 소지 너클(17) -> 검지 너클(5) 가로 축 (해부학적으로 언제나 엄지 쪽 Radial 방향)
   //       그람-슈미트 직교화: u = u_raw - (u_raw · v)v 로 완벽한 90도 직교 가로축 생성
-  const vx = points[9].x - points[0].x, vy = points[9].y - points[0].y;
-  const vLen = Math.hypot(vx, vy) || 1e-5;
-  const vHatX = vx / vLen, vHatY = vy / vLen;
+  const vx = points[9].x - points[0].x;
+  const vy = points[9].y - points[0].y;
+  const vz = ((points[9].z ?? 0) - (points[0].z ?? 0)) * 0.45;
+  const vLen = Math.hypot(vx, vy, vz) || 1e-5;
+  const vHatX = vx / vLen, vHatY = vy / vLen, vHatZ = vz / vLen;
 
-  const ax = points[5].x - points[17].x, ay = points[5].y - points[17].y;
-  const aDotV = ax * vHatX + ay * vHatY;
-  const ux = ax - aDotV * vHatX, uy = ay - aDotV * vHatY;
-  const uLen = Math.hypot(ux, uy) || 1e-5;
-  const uHatX = ux / uLen, uHatY = uy / uLen;
+  const ax = points[5].x - points[17].x;
+  const ay = points[5].y - points[17].y;
+  const az = ((points[5].z ?? 0) - (points[17].z ?? 0)) * 0.45;
+  const aDotV = ax * vHatX + ay * vHatY + az * vHatZ;
+  const ux = ax - aDotV * vHatX;
+  const uy = ay - aDotV * vHatY;
+  const uz = az - aDotV * vHatZ;
+  const uLen = Math.hypot(ux, uy, uz) || 1e-5;
+  const uHatX = ux / uLen, uHatY = uy / uLen, uHatZ = uz / uLen;
 
-  // Zero-GC 스칼라 인라인 내적 및 Z-Damping 거리 계산 함수
-  const projV = (a, b) => ((a.x - b.x) * vHatX + (a.y - b.y) * vHatY) / palm;
-  const projU = (a, b) => ((a.x - b.x) * uHatX + (a.y - b.y) * uHatY) / palm;
-  const distZDamped = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, ((a.z ?? 0) - (b.z ?? 0)) * 0.45);
+  // Zero-GC 3D 스칼라 인라인 정사영 (3D Orthonormal Basis Projections)
+  const projV = (a, b) => (
+    (a.x - b.x) * vHatX +
+    (a.y - b.y) * vHatY +
+    (((a.z ?? 0) - (b.z ?? 0)) * 0.45) * vHatZ
+  ) / palm;
+  const projU = (a, b) => (
+    (a.x - b.x) * uHatX +
+    (a.y - b.y) * uHatY +
+    (((a.z ?? 0) - (b.z ?? 0)) * 0.45) * uHatZ
+  ) / palm;
 
   // Multi-angle finger extension helper for Trigger mode:
   // 너클(MCP)을 로컬 원점으로 삼아, 끝점(Tip)이 첫 마디(PIP)보다 +v 방향으로 앞서 전진했는가를 검증
@@ -151,9 +173,9 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     const cosWristMCP = cos2D(points[0], points[base], points[base + 3]);
     const forwardFromWrist = dvMCP > (isHold ? 0.04 : 0.16) && dvPIP > (isHold ? -0.02 : 0.02) && cosWristMCP < (isHold ? 0.05 : -0.15);
     const minCos = isHold ? -0.15 : -0.38;
-    const minReach = isHold ? 1.12 : 1.26;
+    const minReach = isHold ? 1.05 : 1.20;
     const uncurled = cos2D(points[base], points[base + 1], points[base + 3]) < minCos &&
-      dist2D(points[base + 3], points[base]) > dist2D(points[base + 1], points[base]) * minReach;
+      distZDamped(points[base + 3], points[base]) > distZDamped(points[base + 1], points[base]) * minReach;
     return forwardFromWrist && (uncurled || extended(base));
   };
 
@@ -191,8 +213,12 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   // Radial outward abduction along +uHat:
   // 엄지가 펴지면 ("엄지가위") 3->4 벡터가 +uHat(방사 외측) 방향으로 강하게 전개됨
   // 주먹 위로 엄지가 접히면 3->4 벡터가 -uHat(안쪽) 또는 LM 6에 바짝 붙음
-  const len34 = Math.max(1e-5, dist2D(points[4], points[3]));
-  const radialDir34 = ((points[4].x - points[3].x) * uHatX + (points[4].y - points[3].y) * uHatY) / len34;
+  const len34 = Math.max(1e-5, distZDamped(points[4], points[3]));
+  const radialDir34 = (
+    (points[4].x - points[3].x) * uHatX +
+    (points[4].y - points[3].y) * uHatY +
+    (((points[4].z ?? 0) - (points[3].z ?? 0)) * 0.45) * uHatZ
+  ) / len34;
   const radial24 = projU(points[4], points[2]);
   const thOut9 = dist2D(points[4], points[9]) / Math.max(1e-5, dist2D(points[3], points[9]));
 
@@ -219,7 +245,10 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const dPinkyRingTip = distZDamped(points[20], points[16]) / palm;
   const pinkyStraight = pkCos < -0.45 && pkCosDIP < -0.40;
 
-  const pinkyExtended = !isVSignScroll && (
+  // 소지(Pinky) 전개 검증: 주먹으로 말려들어간 상태(isPinkyClenched) 완전 차단
+  const isPinkyClenched = dist2D(points[20], points[0]) < palm * 0.95 && dist2D(points[20], points[17]) < palm * 0.38;
+
+  const pinkyExtended = !isVSignScroll && !isPinkyClenched && (
     wasPinkyDown
       ? (pkCos < -0.32 && pkCosDIP < -0.28 && dPinkyMCP > 0.38 && pkVsRing > 1.18 && dPinkyRingTip > 0.28)
       : (pkCos < -0.48 && pkCosDIP < -0.40 && dPinkyMCP > 0.45 && pkVsRing > 1.32 && dPinkyRingTip > 0.34)
@@ -305,10 +334,13 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
       };
     }
 
+    const indexStraight = cos2D(points[5], points[6], points[8]) < -0.75;
+
     gates = {
       isFist,
       isScrollGesture,
       indexAiming,
+      indexStraight,
       indexFolded: !indexAiming,
       canPressLeft,
       canPressRight,
@@ -704,7 +736,7 @@ export class AirMouseController {
         this.scrollReleaseCount = 0;
         this.scrollFrames = 0;
       } else if (this.scrollDown) {
-        if (g.isFist || ++this.scrollReleaseCount >= 3) {
+        if (g.isFist || ++this.scrollReleaseCount >= 4) {
           this.scrollDown = false;
           this.scrollReleaseCount = 0;
           this.scrollFrames = 0;
@@ -792,19 +824,38 @@ export class AirMouseController {
         return result;
       }
 
-      // Pointer coordinate calculation & freeze
+      // Pointer coordinate calculation & freeze (Cursor Dip Defense & Target Lock)
       let filtU, filtV;
       if (g.indexFolded) {
-        // Index is folded: hold cursor strictly at the last known aim coordinate
-        filtU = this.lastAimU ?? this.frozenU ?? this.lastEmittedU ?? 0.5;
-        filtV = this.lastAimV ?? this.frozenV ?? this.lastEmittedV ?? 0.5;
-        this.frozenU = filtU;
-        this.frozenV = filtV;
+        // Index is folded: latch cursor strictly to the stable aim coordinate prior to flexion
+        if (this.frozenU === null || this.frozenV === null) {
+          this.frozenU = this.lastStableU ?? this.lastAimU ?? this.lastEmittedU ?? 0.5;
+          this.frozenV = this.lastStableV ?? this.lastAimV ?? this.lastEmittedV ?? 0.5;
+        }
+        filtU = this.frozenU;
+        filtV = this.frozenV;
       } else {
         const rawU = observed.activePos.x;
         const rawV = observed.activePos.y;
         filtU = this.euroU.filter(rawU, now);
         filtV = this.euroV.filter(rawV, now);
+
+        // Target Lock during freeze-click: If left-click was engaged while frozen,
+        // keep cursor locked on target until intentional drag threshold is exceeded!
+        if (this.leftDown && this.frozenU !== null && !this.dragUnlocked) {
+          const dragDist = Math.hypot((filtU - this.frozenU) * 1920, (filtV - this.frozenV) * 1080);
+          if (dragDist < 20) {
+            filtU = this.frozenU;
+            filtV = this.frozenV;
+          } else {
+            this.dragUnlocked = true;
+            this.frozenU = null;
+            this.frozenV = null;
+          }
+        } else {
+          this.frozenU = null;
+          this.frozenV = null;
+        }
 
         // Click Freeze Lock: lock micro-displacement immediately following click until intentional drag
         if (this.leftDown) {
@@ -836,8 +887,17 @@ export class AirMouseController {
         this.lastEmittedV = filtV;
         this.lastAimU = filtU;
         this.lastAimV = filtV;
-        this.frozenU = filtU;
-        this.frozenV = filtV;
+
+        // Stable Aim Tracking: When index is fully straight, continuously update stable coordinates.
+        // During the bending transition (as index curls toward freeze threshold),
+        // lastStableU/V preserves the coordinate BEFORE the tip dips downward!
+        if (g.indexStraight) {
+          this.lastStableU = filtU;
+          this.lastStableV = filtV;
+        } else if (this.lastStableU === null) {
+          this.lastStableU = filtU;
+          this.lastStableV = filtV;
+        }
       }
 
       observed.activePos.x = clamp(Number(filtU.toFixed(4)), 0, 1);

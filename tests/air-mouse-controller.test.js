@@ -713,3 +713,57 @@ test('pointerMode: trigger angled forward fist (dorsal view) rejects bent thumb 
   assert.equal(rState.mode, 'right');
   assert.ok(rState.events.some(e => e.type === 'button' && e.button === 'right' && e.down));
 });
+
+test('pointerMode: trigger front-facing clenched fist (Image 3) is strictly idle and thumb unfolding (Image 2) triggers left click', () => {
+  const s = session({pointerMode:'trigger', smoothing:1});
+  s.hold('trigger');
+
+  // Realistic landmarks corresponding to User Image 3 (Frontal fist with thumb wrapped across index)
+  const makeImage3Fist = () => {
+    return [
+      {x: 0.52, y: 0.82, z: 0.05},  // 0: Wrist
+      {x: 0.38, y: 0.72, z: 0.02},  // 1: Thumb CMC
+      {x: 0.28, y: 0.58, z: -0.01}, // 2: Thumb MCP
+      {x: 0.30, y: 0.44, z: -0.04}, // 3: Thumb IP
+      {x: 0.42, y: 0.47, z: -0.06}, // 4: Thumb Tip (curled across index finger towards middle finger!)
+      {x: 0.40, y: 0.36, z: -0.03}, // 5: Index MCP
+      {x: 0.42, y: 0.46, z: -0.07}, // 6: Index PIP
+      {x: 0.43, y: 0.54, z: -0.06}, // 7: Index DIP
+      {x: 0.44, y: 0.52, z: -0.04}, // 8: Index Tip (curled into palm)
+      {x: 0.49, y: 0.38, z: -0.02}, // 9: Middle MCP
+      {x: 0.49, y: 0.48, z: -0.07}, // 10: Middle PIP
+      {x: 0.48, y: 0.56, z: -0.06}, // 11: Middle DIP
+      {x: 0.46, y: 0.54, z: -0.03}, // 12: Middle Tip (curled into palm, close to LM 4!)
+      {x: 0.56, y: 0.41, z: 0.00},  // 13: Ring MCP
+      {x: 0.56, y: 0.52, z: -0.06}, // 14: Ring PIP
+      {x: 0.54, y: 0.58, z: -0.05}, // 15: Ring DIP
+      {x: 0.52, y: 0.55, z: -0.02}, // 16: Ring Tip (curled into palm)
+      {x: 0.63, y: 0.46, z: 0.02},  // 17: Pinky MCP
+      {x: 0.63, y: 0.56, z: -0.04}, // 18: Pinky PIP
+      {x: 0.61, y: 0.62, z: -0.03}, // 19: Pinky DIP
+      {x: 0.58, y: 0.59, z: -0.01}, // 20: Pinky Tip (curled into palm)
+    ];
+  };
+
+  // 1. Clenched fist with wrapped thumb settles to idle within 4 debounce frames
+  s.feed('fist', {}, {landmarks: makeImage3Fist()});
+  s.feed('fist', {}, {landmarks: makeImage3Fist()});
+  s.feed('fist', {}, {landmarks: makeImage3Fist()});
+  const fistState = s.feed('fist', {}, {landmarks: makeImage3Fist()});
+  assert.equal(fistState.mode, 'idle', 'Clenched fist must be idle');
+  assert.equal(fistState.events.length, 0, 'No mouse events from clenched fist');
+
+  // 2. Unfolding thumb outward (User Image 2 - L-Shape pose) triggers Left Click
+  const lShapeHand = makeImage3Fist();
+  // Extend index upwards
+  lShapeHand[6] = {x: 0.40, y: 0.26, z: -0.05};
+  lShapeHand[7] = {x: 0.40, y: 0.16, z: -0.07};
+  lShapeHand[8] = {x: 0.40, y: 0.06, z: -0.09};
+  // Extend thumb outward to the left (radial abduction)
+  lShapeHand[3] = {x: 0.20, y: 0.52, z: -0.02};
+  lShapeHand[4] = {x: 0.12, y: 0.50, z: -0.02};
+
+  const clickState = s.feed('trigger-left', {}, {landmarks: lShapeHand});
+  assert.equal(clickState.mode, 'left', 'L-shape with extended thumb triggers left click');
+  assert.ok(clickState.events.some(e => e.type === 'button' && e.button === 'left' && e.down));
+});

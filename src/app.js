@@ -304,7 +304,7 @@ function drawHands(landmarks) {
       ctx.beginPath(); ctx.moveTo(hand[a].x * width, hand[a].y * height); ctx.lineTo(hand[b].x * width, hand[b].y * height); ctx.stroke();
     }
     for (const point of hand) { ctx.beginPath(); ctx.arc(point.x * width, point.y * height, Math.max(2, width / 350), 0, Math.PI * 2); ctx.fill(); }
-    if (controlMode === 'mouse') {
+    if (controlMode === 'mouse' && mouse?.controller?.pointerMode !== 'trigger') {
       const p4 = hand[4], p8 = hand[8], p12 = hand[12], p16 = hand[16];
       const dMiddle = Math.hypot(p4.x - p12.x, (p4.y - p12.y) * height / width);
       const dRing = p16 ? Math.hypot(p4.x - p16.x, (p4.y - p16.y) * height / width) : 1;
