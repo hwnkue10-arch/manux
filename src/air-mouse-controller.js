@@ -195,8 +195,8 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     ? indexOpen
     : (indexOpen && (dist2D(points[8], points[5]) > dist2D(points[6], points[5]) * 1.32 || dist2D(points[8], points[0]) > palm * 1.05));
 
-  // Open Palm posture (🖐): Middle + Ring fingers both extended forward (or all 4)
-  const openPalmPosture = pointerMode === 'trigger' && middleOpen && ringOpen;
+  // Open Palm posture (🖐): Index + Middle + Ring fingers all extended forward (4~5 finger open hand)
+  const openPalmPosture = pointerMode === 'trigger' && indexOpen && middleOpen && ringOpen;
 
   // V-sign posture: In Trigger Mode, anytime Index + Middle are both extended forward, engage scroll!
   const vSignPosture = pointerMode === 'trigger'
@@ -257,10 +257,11 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const dPinkyRingTip = distZDamped(points[20], points[16]) / palm;
   const pinkyStraight = pkCos < -0.45 && pkCosDIP < -0.40;
 
-  // 소지(Pinky) 전개 검증: 주먹으로 말려들어간 상태(isPinkyClenched) 완전 차단
+  // 소지(Pinky) 전개 검증: 주먹으로 말려들어간 상태(isPinkyClenched) 완전 차단 및 너클 대비 +v 원위 전진 검증
   const isPinkyClenched = dist2D(points[20], points[0]) < palm * 0.95 && dist2D(points[20], points[17]) < palm * 0.38;
+  const pinkyForward = projV(points[20], points[17]) > (wasPinkyDown ? 0.04 : 0.14);
 
-  const pinkyExtended = !isVSignScroll && !isPinkyClenched && (
+  const pinkyExtended = !isVSignScroll && !isPinkyClenched && pinkyForward && (
     wasPinkyDown
       ? (pkCos < -0.32 && pkCosDIP < -0.28 && dPinkyMCP > 0.38 && pkVsRing > 1.15 && dPinkyRingTip > 0.28)
       : (pkCos < -0.45 && pkCosDIP < -0.38 && dPinkyMCP > 0.44 && pkVsRing > 1.25 && dPinkyRingTip > 0.32)
@@ -848,9 +849,9 @@ export class AirMouseController {
       if (g.indexFolded) {
         // Index is folded: latch cursor strictly to the stable aim coordinate prior to flexion
         if (this.frozenU === null || this.frozenV === null) {
-          // Look backwards in aimHistory to rewind past the downward dip frames to the last straight frame
+          // Forward search in aimHistory to pick the earliest stable straight frame (~70ms prior to flexion)
           let rewindPos = null;
-          for (let i = this.aimHistory.length - 1; i >= 0; i--) {
+          for (let i = 0; i < this.aimHistory.length; i++) {
             if (this.aimHistory[i].straight) {
               rewindPos = this.aimHistory[i];
               break;

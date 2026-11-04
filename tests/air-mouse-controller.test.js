@@ -551,7 +551,7 @@ test('pointerMode: trigger tracks index tip and folding index freezes cursor pos
   const s = session({pointerMode:'trigger', smoothing:1});
   s.hold('trigger');
 
-  const p1 = s.feed('trigger', {x: 0.01});
+  const p1 = s.feed('trigger');
   assert.equal(p1.mode, 'move');
   const freezeU = p1.activePos.x;
   const freezeV = p1.activePos.y;
@@ -594,24 +594,24 @@ test('pointerMode: trigger fold-to-freeze then extend-thumb clicks at the frozen
   s.hold('trigger');
 
   // Move pointer to target
-  const pTarget = s.feed('trigger', {x: 0.02});
+  const pTarget = s.feed('trigger');
   const targetU = pTarget.activePos.x;
   const targetV = pTarget.activePos.y;
 
   // 1. Fold index to freeze
-  const pFreeze = s.feed('trigger-freeze');
+  const pFreeze = s.feed('trigger-freeze', {x: 0.03, y: 0.03});
   assert.equal(pFreeze.mode, 'frozen');
   assert.equal(pFreeze.activePos.x, targetU);
 
   // 2. Extend thumb while index is folded -> Left Click fires AT target position!
-  const pClick = s.feed('trigger-freeze-click');
+  const pClick = s.feed('trigger-freeze-click', {x: 0.03, y: 0.03});
   assert.equal(pClick.mode, 'left');
   assert.ok(pClick.events.some(e => e.type === 'button' && e.button === 'left' && e.down));
   assert.equal(pClick.activePos.x, targetU);
 
   // 3. Retract thumb -> Left Click releases AT target position
-  s.feed('trigger-freeze');
-  const pUp = s.feed('trigger-freeze');
+  s.feed('trigger-freeze', {x: 0.03, y: 0.03});
+  const pUp = s.feed('trigger-freeze', {x: 0.03, y: 0.03});
   assert.ok(pUp.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
   assert.equal(pUp.activePos.x, targetU);
 });
@@ -704,11 +704,11 @@ test('pointerMode: trigger angled forward fist (dorsal view) rejects bent thumb 
   const releaseState = s.feed('fist', {}, {landmarks: makeAngledHand()});
   assert.ok(releaseState.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
 
-  // 4. Unfolding pinky in the angled view triggers Right Click
+  // 4. Unfolding pinky forward in the angled view triggers Right Click
   const pinkyOpen = makeAngledHand();
-  pinkyOpen[18] = {x: 0.46, y: 0.70, z: 0};
-  pinkyOpen[19] = {x: 0.40, y: 0.80, z: 0};
-  pinkyOpen[20] = {x: 0.34, y: 0.88, z: 0};
+  pinkyOpen[18] = {x: 0.55, y: 0.48, z: 0};
+  pinkyOpen[19] = {x: 0.58, y: 0.38, z: 0};
+  pinkyOpen[20] = {x: 0.62, y: 0.28, z: 0};
   const rState = s.feed('fist', {}, {landmarks: pinkyOpen});
   assert.equal(rState.mode, 'right');
   assert.ok(rState.events.some(e => e.type === 'button' && e.button === 'right' && e.down));
