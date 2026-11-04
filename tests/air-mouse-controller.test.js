@@ -767,3 +767,62 @@ test('pointerMode: trigger front-facing clenched fist (Image 3) is strictly idle
   assert.equal(clickState.mode, 'left', 'L-shape with extended thumb triggers left click');
   assert.ok(clickState.events.some(e => e.type === 'button' && e.button === 'left' && e.down));
 });
+
+test('pointerMode: trigger 3D pitch/yaw invariance (cos3D keeps forward index aiming, clamped ringSpan rejects fist)', () => {
+  const s = session({pointerMode:'trigger', smoothing:1});
+  s.hold('trigger');
+
+  // Forward pitched hand aiming directly toward camera (Z-axis foreshortened in 2D)
+  const pitchedHand = hand('trigger');
+  // In 2D, index joints 6, 7, 8 collapse close in Y, but extend along Z:
+  pitchedHand[5] = {x: 0.43, y: 0.60, z: 0.0};
+  pitchedHand[6] = {x: 0.43, y: 0.58, z: -0.15};
+  pitchedHand[7] = {x: 0.43, y: 0.57, z: -0.30};
+  pitchedHand[8] = {x: 0.43, y: 0.56, z: -0.45}; // Aiming straight forward at camera!
+
+  const aimState = s.feed('trigger', {}, {landmarks: pitchedHand});
+  assert.equal(aimState.mode, 'move', 'Forward pitched index must remain in move mode');
+  assert.equal(aimState.fingertips?.index?.visible, true, 'cos3D recognizes straight forward aiming');
+
+  // Multi-frame flexion to freeze: verify aimHistory rewinds past transitional dip
+  const dipFrame1 = hand('trigger');
+  dipFrame1[8] = {x: 0.43, y: 0.45, z: 0.0};
+  s.feed('trigger', {}, {landmarks: dipFrame1});
+
+  const foldFrame = hand('trigger-freeze');
+  const freezeState = s.feed('trigger-freeze', {}, {landmarks: foldFrame});
+  assert.equal(freezeState.mode, 'frozen');
+  assert.ok(Number.isFinite(freezeState.activePos.x));
+});
+
+test('pointerMode: trigger Open Palm (🖐) and V-Sign (✌️) scroll seamlessly with zero click interference and anti-dropout hysteresis', () => {
+  const s = session({pointerMode:'trigger', vScroll:true, smoothing:1});
+  s.hold('trigger');
+
+  // 1. Open Palm (🖐) engages scroll: middle + ring + pinky all extended
+  s.feed('trigger-open-palm');
+  s.feed('trigger-open-palm');
+  const scrollState = s.feed('trigger-open-palm', {y: -0.04});
+  assert.equal(scrollState.mode, 'scroll', 'Open palm must engage scroll mode');
+  assert.ok(scrollState.events.some(e => e.type === 'scroll'), 'Must emit scroll events');
+
+  // 2. Zero click interference: even if thumb is stretched during open palm, NO left/right click
+  const openPalmWithThumb = hand('trigger-open-palm');
+  openPalmWithThumb[4] = {x: 0.15, y: 0.50, z: 0}; // thumb fully extended
+  const clickBlockedState = s.feed('trigger-open-palm', {y: -0.04}, {landmarks: openPalmWithThumb});
+  assert.equal(clickBlockedState.mode, 'scroll', 'Must remain in scroll');
+  assert.equal(clickBlockedState.events.filter(e => e.type === 'button').length, 0, 'Zero click events during open palm scroll');
+
+  // 3. Anti-dropout hysteresis: a brief 1-frame DIP/bend during downward sweep does NOT break scroll
+  const dippedFrame = hand('trigger-open-palm');
+  dippedFrame[12] = {x: 0.50, y: 0.38, z: 0}; // middle tip briefly bent downwards
+  const dippedState = s.feed('trigger-open-palm', {y: -0.05}, {landmarks: dippedFrame});
+  assert.equal(dippedState.mode, 'scroll', 'Scroll must survive downward sweep finger dip');
+
+  // 4. Return to index aim: folding back to single index aim exits scroll after debounce
+  s.feed('trigger');
+  s.feed('trigger');
+  s.feed('trigger');
+  const aimRecovered = s.feed('trigger');
+  assert.equal(aimRecovered.mode, 'move', 'Returns cleanly to pointer move mode');
+});

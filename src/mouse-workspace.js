@@ -154,7 +154,7 @@ export class MouseWorkspace {
         case 'left': return '🔫 좌클릭 · 드래그 (엄지 펴기)';
         case 'right': return '🤙 우클릭 (소지 펴기)';
         case 'both': return '🤙 좌우 동시 클릭 (엄지+소지)';
-        case 'scroll': return '✌️ 휠 스크롤 (V자 위아래)';
+        case 'scroll': return '🖐️ 휠 스크롤 (손바닥/V자 위아래)';
         default: return '대기 중';
       }
     } else if (pointerMode === 'index') {
@@ -164,7 +164,7 @@ export class MouseWorkspace {
         case 'left': return '🤏 좌클릭 · 드래그 (엄지+중지)';
         case 'right': return '👆 우클릭 (엄지+약지)';
         case 'both': return '🤏 좌우 동시 클릭 (엄지+중지+약지)';
-        case 'scroll': return '✌️ 휠 스크롤 (V자 위아래)';
+        case 'scroll': return '🖐️ 휠 스크롤 (손바닥/V자 위아래)';
         default: return '대기 중';
       }
     } else {
@@ -199,7 +199,7 @@ export class MouseWorkspace {
         if (a1) a1.innerHTML = '<h3>👆 1: 포인터 이동 (검지)</h3><p>검지 끝(LM 8) 직접 추적<br>검지를 접으면 그 자리에 커서 고정(Freeze)</p>';
         if (a2) a2.innerHTML = '<h3>🔫 엄지 펴기: 좌클릭 & 드래그</h3><p>엄지만 펴면 즉시 좌클릭 & 유지 시 드래그<br>검지를 접고 엄지를 펴면 흔들림 0% 정밀 클릭</p>';
         if (a3) a3.innerHTML = '<h3>🤙 소지 펴기: 우클릭</h3><p>새끼손가락(소지)만 펴면 우클릭<br>엄지와 소지를 같이 펴면 좌우 동시 클릭</p>';
-        if (a4) a4.innerHTML = '<h3>✌️ V 제스처: 휠 스크롤</h3><p>검지+중지 펴고 위아래 이동 시 스크롤<br>주먹 쥐면(✊) 완전한 쉬는 자세</p>';
+        if (a4) a4.innerHTML = '<h3>🖐️ 손바닥 펴기: 휠 스크롤</h3><p>손바닥 활짝(🖐) 또는 V자(✌️) 펴고 위아래 이동 시 스크롤<br>주먹 쥐면(✊) 완전한 쉬는 자세</p>';
       } else if (mode === 'index') {
         if (a1) a1.innerHTML = '<h3>👆 검지 포인터 이동</h3><p>검지 끝(LM 8) 직접 추적<br>주먹 외 모든 자세 추적 · 떨림 방지</p>';
         if (a2) a2.innerHTML = '<h3>🤏 엄지+중지: 좌클릭 & 드래그</h3><p>엄지+중지 맞닿으면 좌클릭 & 더블클릭<br>검지 흔들림 0% · 연속 드래그</p>';
@@ -357,7 +357,7 @@ export class MouseWorkspace {
         holding:'손 모양을 확인하고 있습니다.',
         'tracking-reset':'손 위치를 다시 잡았습니다. 천천히 움직여주세요.',
       };
-      this.status(hints[state.phase] || (state.mode === 'idle' ? '쉬는 중입니다 (주먹/휴식).' : (state.mode === 'scroll' ? '✌️ 휠 스크롤 중 · 손을 위아래로 그으세요.' : (state.mode === 'frozen' ? '🔒 커서 고정됨 · 엄지를 펴서 클릭하세요.' : `${this.getModeLabel(state.mode)} 중`))));
+      this.status(hints[state.phase] || (state.mode === 'idle' ? '쉬는 중입니다 (주먹/휴식).' : (state.mode === 'scroll' ? '🖐️ 휠 스크롤 중 · 손을 위아래로 그으세요.' : (state.mode === 'frozen' ? '🔒 커서 고정됨 · 엄지를 펴서 클릭하세요.' : `${this.getModeLabel(state.mode)} 중`))));
     }
 
     const labelText = this.enabled ? this.getModeLabel(state.mode) : '대기 중';

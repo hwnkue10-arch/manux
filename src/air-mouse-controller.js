@@ -19,6 +19,13 @@ function cos2D(a, b, c) {
   return length > 1e-8 ? (ux * vx + uy * vy) / length : 0;
 }
 
+function cos3D(a, b, c) {
+  const ux = a.x - b.x, uy = a.y - b.y, uz = ((a.z ?? 0) - (b.z ?? 0)) * 0.45;
+  const vx = c.x - b.x, vy = c.y - b.y, vz = ((c.z ?? 0) - (b.z ?? 0)) * 0.45;
+  const length = Math.hypot(ux, uy, uz) * Math.hypot(vx, vy, vz);
+  return length > 1e-8 ? (ux * vx + uy * vy + uz * vz) / length : 0;
+}
+
 function distToSegment(p, a, b) {
   const vx = b.x - a.x, vy = b.y - a.y;
   const lenSq = vx * vx + vy * vy;
@@ -170,38 +177,42 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const fingerOpen2D = (base, isHold = false) => {
     const dvMCP = projV(points[base + 3], points[base]);
     const dvPIP = projV(points[base + 3], points[base + 1]);
-    const cosWristMCP = cos2D(points[0], points[base], points[base + 3]);
-    const forwardFromWrist = dvMCP > (isHold ? 0.04 : 0.16) && dvPIP > (isHold ? -0.02 : 0.02) && cosWristMCP < (isHold ? 0.05 : -0.15);
-    const minCos = isHold ? -0.15 : -0.38;
-    const minReach = isHold ? 1.05 : 1.20;
-    const uncurled = cos2D(points[base], points[base + 1], points[base + 3]) < minCos &&
+    const cosWristMCP = cos3D(points[0], points[base], points[base + 3]);
+    const forwardFromWrist = dvMCP > (isHold ? -0.02 : 0.16) && dvPIP > (isHold ? -0.06 : 0.02) && cosWristMCP < (isHold ? 0.12 : -0.15);
+    const minCos = isHold ? 0.0 : -0.38;
+    const minReach = isHold ? 0.95 : 1.20;
+    const uncurled = cos3D(points[base], points[base + 1], points[base + 3]) < minCos &&
       distZDamped(points[base + 3], points[base]) > distZDamped(points[base + 1], points[base]) * minReach;
     return forwardFromWrist && (uncurled || extended(base));
   };
 
   const indexOpen = pointerMode === 'trigger' ? fingerOpen2D(5, wasScrolling) : index;
   const middleOpen = pointerMode === 'trigger' ? fingerOpen2D(9, wasScrolling) : middle;
-  const ringOpen = pointerMode === 'trigger' ? fingerOpen2D(13, false) : ring;
+  const ringOpen = pointerMode === 'trigger' ? fingerOpen2D(13, wasScrolling) : ring;
 
   // In index-like modes, index finger aiming away from knuckle
   const indexAiming = pointerMode === 'trigger'
     ? indexOpen
     : (indexOpen && (dist2D(points[8], points[5]) > dist2D(points[6], points[5]) * 1.32 || dist2D(points[8], points[0]) > palm * 1.05));
 
-  // V-sign posture: In Trigger Mode, anytime Index + Middle are both extended forward, engage V-sign scroll!
+  // Open Palm posture (🖐): Middle + Ring fingers both extended forward (or all 4)
+  const openPalmPosture = pointerMode === 'trigger' && middleOpen && ringOpen;
+
+  // V-sign posture: In Trigger Mode, anytime Index + Middle are both extended forward, engage scroll!
   const vSignPosture = pointerMode === 'trigger'
     ? (indexOpen && middleOpen)
     : (indexAiming && middleOpen && !ringOpen);
 
   const middleRaised = middleOpen;
 
-  // V-sign scroll: Index + Middle raised. 100% decoupled from thumb!
-  const isVSignScroll = allowVScroll && vSignPosture;
+  // Trigger Scroll: Engages on either Open Palm (🖐) or V-Sign (✌️), 100% decoupled from thumb/pinky clicks!
+  const isScrollTrigger = allowVScroll && (vSignPosture || openPalmPosture);
+  const isVSignScroll = isScrollTrigger;
 
   // 3. Thumb Extension (엄지가위 👆+👍 - Left Click):
-  //    그람-슈미트 직교계(uHat, vHat)와 검지 첫 마디(LM 6) 3D 유클리드 거리로 주먹 접힘 100% 차단
-  const thCos234 = cos2D(points[2], points[3], points[4]);
-  const thCos124 = cos2D(points[1], points[2], points[4]);
+  //    3D 관절 각도(cos3D)와 검지 첫 마디(LM 6) 3D 이격 거리로 주먹 오작동 차단 및 다각도 클릭 안정화
+  const thCos234 = cos3D(points[2], points[3], points[4]);
+  const thCos124 = cos3D(points[1], points[2], points[4]);
   const dThumbMCP = distZDamped(points[4], points[2]) / palm;
   const dThumbBase5 = distZDamped(points[4], points[5]) / palm;
   const dThumbBase6 = distZDamped(points[4], points[6]) / palm;
@@ -212,7 +223,6 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
   // Radial outward abduction along +uHat:
   // 엄지가 펴지면 ("엄지가위") 3->4 벡터가 +uHat(방사 외측) 방향으로 강하게 전개됨
-  // 주먹 위로 엄지가 접히면 3->4 벡터가 -uHat(안쪽) 또는 LM 6에 바짝 붙음
   const len34 = Math.max(1e-5, distZDamped(points[4], points[3]));
   const radialDir34 = (
     (points[4].x - points[3].x) * uHatX +
@@ -220,28 +230,30 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     (((points[4].z ?? 0) - (points[3].z ?? 0)) * 0.45) * uHatZ
   ) / len34;
   const radial24 = projU(points[4], points[2]);
-  const thOut9 = dist2D(points[4], points[9]) / Math.max(1e-5, dist2D(points[3], points[9]));
 
-  const thStraight = thCos234 < (wasThumbDown ? -0.40 : -0.55) && thCos124 < (wasThumbDown ? -0.40 : -0.55);
-  const thAbducted = radialDir34 > (wasThumbDown ? 0.22 : 0.35) &&
-                     radial24 > (wasThumbDown ? 0.15 : 0.19) &&
-                     thOut9 > (wasThumbDown ? 1.08 : 1.15);
-  const thReach = dThumbMCP > (wasThumbDown ? 0.30 : 0.34);
-  const thClearance = dThumbBase5 > (wasThumbDown ? 0.25 : 0.29) &&
-                      dThumbBase6 > (wasThumbDown ? 0.26 : 0.32) &&
-                      dThumbBase9 > (wasThumbDown ? 0.36 : 0.42);
+  // Thumb Straightness in 3D: either full joint (1-2-4) or distal joint (2-3-4) is straight
+  const thStraight = thCos234 < (wasThumbDown ? -0.35 : -0.48) && (thCos124 < (wasThumbDown ? -0.25 : -0.38) || thCos234 < -0.65);
+
+  // Radial outward abduction: extends outward away from palm axis
+  const thAbducted = (radialDir34 > (wasThumbDown ? 0.15 : 0.25) || radial24 > (wasThumbDown ? 0.12 : 0.16));
+
+  // Reach & Clearance: must clearly detach from the curled index finger (LM 6) and MCP (LM 5)
+  const thReach = dThumbMCP > (wasThumbDown ? 0.26 : 0.30);
+  const thClearance = dThumbBase6 > (wasThumbDown ? 0.24 : 0.28) &&
+                      dThumbBase5 > (wasThumbDown ? 0.22 : 0.26);
 
   const thumbExtended = !isVSignScroll && thStraight && thAbducted && thReach && thClearance;
 
   // 4. Pinky Extension (우클릭 - Right Click):
-  //    소지 직선도, 약지 대비 독립 전개량(pkVsRing), 약지 끝(16)과의 이격 거리 검증
+  //    소지 3D 직선도(cos3D), 약지 분모 하한선 보정 pkVsRing, 약지 끝(16)과의 이격 거리 검증
   const dPinkyMCP = distZDamped(points[20], points[17]) / palm;
   const dPinkyWrist = distZDamped(points[20], points[0]) / palm;
   const d3PinkyMCP = dPinkyMCP;
   const d3PinkyWrist = dPinkyWrist;
-  const pkCos = cos2D(points[17], points[18], points[20]);
-  const pkCosDIP = cos2D(points[18], points[19], points[20]);
-  const pkVsRing = dist2D(points[20], points[17]) / Math.max(1e-5, dist2D(points[16], points[13]));
+  const pkCos = cos3D(points[17], points[18], points[20]);
+  const pkCosDIP = cos3D(points[18], points[19], points[20]);
+  const ringSpan = Math.max(0.22 * palm, distZDamped(points[16], points[13]));
+  const pkVsRing = distZDamped(points[20], points[17]) / ringSpan;
   const dPinkyRingTip = distZDamped(points[20], points[16]) / palm;
   const pinkyStraight = pkCos < -0.45 && pkCosDIP < -0.40;
 
@@ -250,8 +262,8 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
   const pinkyExtended = !isVSignScroll && !isPinkyClenched && (
     wasPinkyDown
-      ? (pkCos < -0.32 && pkCosDIP < -0.28 && dPinkyMCP > 0.38 && pkVsRing > 1.18 && dPinkyRingTip > 0.28)
-      : (pkCos < -0.48 && pkCosDIP < -0.40 && dPinkyMCP > 0.45 && pkVsRing > 1.32 && dPinkyRingTip > 0.34)
+      ? (pkCos < -0.32 && pkCosDIP < -0.28 && dPinkyMCP > 0.38 && pkVsRing > 1.15 && dPinkyRingTip > 0.28)
+      : (pkCos < -0.45 && pkCosDIP < -0.38 && dPinkyMCP > 0.44 && pkVsRing > 1.25 && dPinkyRingTip > 0.32)
   );
 
   const triggerAllFourFolded = !indexAiming && !middleRaised && !pinkyExtended;
@@ -334,13 +346,16 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
       };
     }
 
-    const indexStraight = cos2D(points[5], points[6], points[8]) < -0.75;
+    const indexStraight = cos3D(points[5], points[6], points[8]) < -0.75;
 
     gates = {
       isFist,
       isScrollGesture,
       indexAiming,
       indexStraight,
+      isIndexStraight: indexStraight,
+      middleRaised,
+      ringOpen,
       indexFolded: !indexAiming,
       canPressLeft,
       canPressRight,
@@ -527,6 +542,7 @@ export class AirMouseController {
     this.aimHistory = [];
     this.scrollAnchorX = null;
     this.scrollAnchorY = null;
+    this.lastScrollTrackY = null;
     this.scrollVelocity = 0;
     this.scrollDown = false;
     this.scrollReleaseCount = 0;
@@ -597,6 +613,7 @@ export class AirMouseController {
     this.aimHistory = [];
     this.scrollAnchorX = null;
     this.scrollAnchorY = null;
+    this.lastScrollTrackY = null;
     this.scrollVelocity = 0;
     this.fistFrames = 0;
     return this.state('disabled', [{type:'release'}]);
@@ -720,7 +737,7 @@ export class AirMouseController {
       // 6. Rest: Complete 5-finger fist (all 4 fingers curled AND thumb not extended).
       const g = observed.gates;
 
-      // Scroll (✌️ V-sign trigger): Middle tip raised engages wheel continuously
+      // Scroll (🖐 Open Palm / ✌️ V-sign trigger): Engages wheel continuously with hysteresis
       if (g.isScrollGesture) {
         if (this.leftDown) {
           this.leftDown = false;
@@ -736,7 +753,9 @@ export class AirMouseController {
         this.scrollReleaseCount = 0;
         this.scrollFrames = 0;
       } else if (this.scrollDown) {
-        if (g.isFist || ++this.scrollReleaseCount >= 4) {
+        // Exit scroll when hand turns into a fist OR returns to clean single index aiming
+        const returningToAim = Boolean(g.isIndexStraight && !g.middleRaised && !g.ringOpen);
+        if (g.isFist || ++this.scrollReleaseCount >= (returningToAim ? 4 : 8)) {
           this.scrollDown = false;
           this.scrollReleaseCount = 0;
           this.scrollFrames = 0;
@@ -829,8 +848,17 @@ export class AirMouseController {
       if (g.indexFolded) {
         // Index is folded: latch cursor strictly to the stable aim coordinate prior to flexion
         if (this.frozenU === null || this.frozenV === null) {
-          this.frozenU = this.lastStableU ?? this.lastAimU ?? this.lastEmittedU ?? 0.5;
-          this.frozenV = this.lastStableV ?? this.lastAimV ?? this.lastEmittedV ?? 0.5;
+          // Look backwards in aimHistory to rewind past the downward dip frames to the last straight frame
+          let rewindPos = null;
+          for (let i = this.aimHistory.length - 1; i >= 0; i--) {
+            if (this.aimHistory[i].straight) {
+              rewindPos = this.aimHistory[i];
+              break;
+            }
+          }
+          const chosen = rewindPos ?? (this.aimHistory.length > 0 ? this.aimHistory[0] : null);
+          this.frozenU = chosen?.u ?? this.lastStableU ?? this.lastAimU ?? this.lastEmittedU ?? 0.5;
+          this.frozenV = chosen?.v ?? this.lastStableV ?? this.lastAimV ?? this.lastEmittedV ?? 0.5;
         }
         filtU = this.frozenU;
         filtV = this.frozenV;
@@ -839,6 +867,10 @@ export class AirMouseController {
         const rawV = observed.activePos.y;
         filtU = this.euroU.filter(rawU, now);
         filtV = this.euroV.filter(rawV, now);
+
+        // Aim History Ring Buffer (5 frames): buffers trajectory with straight posture flag
+        this.aimHistory.push({u: filtU, v: filtV, straight: Boolean(g.indexStraight)});
+        if (this.aimHistory.length > 5) this.aimHistory.shift();
 
         // Target Lock during freeze-click: If left-click was engaged while frozen,
         // keep cursor locked on target until intentional drag threshold is exceeded!
@@ -905,13 +937,18 @@ export class AirMouseController {
 
       if (this.mode === 'scroll') {
         // === RATE-BASED AUTO-SCROLL ANCHOR (휠클릭 자동 스크롤 모드) ===
+        const currentScrollAnchorY = g.isScrollGesture
+          ? observed.anchor.y
+          : (this.lastScrollTrackY ?? observed.anchor.y);
+        this.lastScrollTrackY = currentScrollAnchorY;
+
         if (this.scrollAnchorY === null) {
-          this.scrollAnchorY = observed.anchor.y;
+          this.scrollAnchorY = currentScrollAnchorY;
           this.scrollAnchorX = observed.anchor.x;
           this.remaining.y = 0;
         }
         const anchorY = this.scrollAnchorY;
-        const offsetY = observed.anchor.y - anchorY;
+        const offsetY = currentScrollAnchorY - anchorY;
         const DEADZONE = 0.012; // ±12px deadzone around center anchor
         let velocity = 0;
         if (Math.abs(offsetY) > DEADZONE) {
@@ -932,6 +969,7 @@ export class AirMouseController {
         this.scrollAnchorY = null;
         this.scrollAnchorX = null;
         this.scrollVelocity = 0;
+        this.lastScrollTrackY = null;
         this.lastTouchY = null;
         events.push({type: 'moveTo', x: observed.activePos.x, y: observed.activePos.y});
       }
