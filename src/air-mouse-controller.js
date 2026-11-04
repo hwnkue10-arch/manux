@@ -120,22 +120,27 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   // Clenched fingers count: fingers curled tightly into palm
   const clenchedCount = [8, 12, 16, 20].filter(tip => dist2D(points[tip], points[0]) < palm * 1.05).length;
 
-  // Multi-angle finger extension helper for Trigger mode (2D joint uncurl + reach past PIP)
-  const fingerOpen2D = base =>
-    (cos2D(points[base], points[base + 1], points[base + 3]) < -0.45 &&
-     dist2D(points[base + 3], points[base]) > dist2D(points[base + 1], points[base]) * 1.30) ||
-    extended(base);
+  const wasScrolling = previousPinch === 'scroll';
 
-  const indexOpen = pointerMode === 'trigger' ? fingerOpen2D(5) : index;
+  // Multi-angle finger extension helper for Trigger mode (2D joint uncurl + reach past PIP)
+  const fingerOpen2D = (base, isHold = false) => {
+    const minCos = isHold ? -0.22 : -0.42;
+    const minReach = isHold ? 1.18 : 1.30;
+    return (cos2D(points[base], points[base + 1], points[base + 3]) < minCos &&
+     dist2D(points[base + 3], points[base]) > dist2D(points[base + 1], points[base]) * minReach) ||
+    extended(base);
+  };
+
+  const indexOpen = pointerMode === 'trigger' ? fingerOpen2D(5, wasScrolling) : index;
   const middleOpen = pointerMode === 'trigger'
-    ? (fingerOpen2D(9) && dist2D(points[12], points[9]) > dist2D(points[16], points[13]) * 1.22)
+    ? (fingerOpen2D(9, wasScrolling) && dist2D(points[12], points[9]) > dist2D(points[16], points[13]) * (wasScrolling ? 1.06 : 1.18))
     : middle;
   const ringOpen = pointerMode === 'trigger'
     ? (fingerOpen2D(13) && dist2D(points[16], points[13]) > palm * 0.48)
     : ring;
 
   // In index-like modes, index finger aiming away from knuckle
-  const indexAiming = indexOpen && (dist2D(points[8], points[5]) > dist2D(points[6], points[5]) * 1.32 || dist2D(points[8], points[0]) > palm * 1.10);
+  const indexAiming = indexOpen && (dist2D(points[8], points[5]) > dist2D(points[6], points[5]) * (wasScrolling ? 1.15 : 1.32) || dist2D(points[8], points[0]) > palm * 1.05);
 
   // V-sign posture (Index + Middle raised while Ring is curled)
   const vSignPosture = indexAiming && middleOpen && !ringOpen;
@@ -448,6 +453,8 @@ export class AirMouseController {
     this.scrollAnchorX = null;
     this.scrollAnchorY = null;
     this.scrollVelocity = 0;
+    this.scrollDown = false;
+    this.scrollReleaseCount = 0;
     this.fistFrames = 0;
     this.reset();
   }
@@ -635,10 +642,30 @@ export class AirMouseController {
       // 6. Rest: Complete 5-finger fist (all 4 fingers curled AND thumb not extended).
       const g = observed.gates;
 
-      // Scroll requires a stable V-sign for 3 frames and can never start while a button is held.
-      if (g.isScrollGesture && !this.leftDown && !this.rightDown) this.scrollFrames++;
-      else this.scrollFrames = 0;
-      const scrolling = this.scrollFrames >= 3;
+      // Scroll (✌️ V-sign trigger): fast 2-frame engage, 2-frame debounced release with sticky hysteresis
+      if (this.scrollDown) {
+        if (g.isFist) {
+          this.scrollDown = false;
+          this.scrollReleaseCount = 0;
+          this.scrollFrames = 0;
+        } else if (!g.isScrollGesture) {
+          if (++this.scrollReleaseCount >= 2) {
+            this.scrollDown = false;
+            this.scrollReleaseCount = 0;
+            this.scrollFrames = 0;
+          }
+        } else {
+          this.scrollReleaseCount = 0;
+        }
+      } else if (g.isScrollGesture && !this.leftDown && !this.rightDown && !g.isFist) {
+        if (++this.scrollFrames >= 2) {
+          this.scrollDown = true;
+          this.scrollReleaseCount = 0;
+        }
+      } else {
+        this.scrollFrames = 0;
+      }
+      const scrolling = this.scrollDown;
 
       // Left Click (Thumb trigger): instant press, 2-frame debounced release
       if (this.leftDown) {
@@ -700,7 +727,7 @@ export class AirMouseController {
         this.mode = 'move';
         this.fistFrames = 0;
       }
-      this.pinch = this.mode === 'both' || this.mode === 'left' || this.mode === 'right' ? this.mode : null;
+      this.pinch = scrolling ? 'scroll' : (this.mode === 'both' || this.mode === 'left' || this.mode === 'right' ? this.mode : null);
 
       // While held, keep corresponding fingertip visible and active on HUD
       if (this.lastFingertips) {
