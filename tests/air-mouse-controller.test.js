@@ -378,10 +378,10 @@ test('pointerMode: index left pinch holds left button continuously for reliable 
   // Left button MUST NOT be released or pressed again during drag
   assert.equal(pDrag.events.filter(e => e.type === 'button').length, 0);
 
-  // Release fingers
+  // Release fingers (debounced: separation must persist for 2 frames)
   const openIndex = hand('index');
-  const pRelease = s.feed('index', {}, {landmarks: openIndex});
-  assert.ok(pRelease.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
+  const pRelease = [s.feed('index', {}, {landmarks: openIndex}), s.feed('index', {}, {landmarks: openIndex})];
+  assert.ok(pRelease.flatMap(r => r.events).some(e => e.type === 'button' && e.button === 'left' && !e.down));
 });
 
 test('pointerMode: index right click triggers on Thumb + Ring touch and never in Fist', () => {
@@ -401,9 +401,9 @@ test('pointerMode: index right click triggers on Thumb + Ring touch and never in
   assert.equal(rightStates.at(-1).mode, 'right');
   assert.ok(rightStates.flatMap(s => s.events).some(e => e.type === 'button' && e.button === 'right' && e.down));
 
-  // Releasing Thumb + Ring touch releases Right Click
-  const releaseState = s.feed('index');
-  assert.ok(releaseState.events.some(e => e.type === 'button' && e.button === 'right' && !e.down));
+  // Releasing Thumb + Ring touch releases Right Click (debounced 2 frames)
+  const releaseStates = [s.feed('index'), s.feed('index')];
+  assert.ok(releaseStates.flatMap(r => r.events).some(e => e.type === 'button' && e.button === 'right' && !e.down));
 });
 
 test('pointerMode: index smartphone touch swipe scrolls down when swiping up, and fist lifts touch', () => {
@@ -440,32 +440,28 @@ test('pointerMode: index smartphone touch swipe scrolls down when swiping up, an
   const fistDown = s.feed('fist', {}, {landmarks: hand('fist', {y: 0.05})});
   assert.equal(fistDown.events.filter(e => e.type === 'scroll').length, 0);
 
-  // Open Palm Scroll (🖐️ 5 fingers open):
+  // Open palm (🖐️) is the natural relaxed pose: it must stay pointer movement, never scroll.
   for (let i = 0; i < 4; i++) s.feed('move', {}, {landmarks: hand('open')});
-  const openTouch = s.feed('move', {}, {landmarks: hand('open')});
-  assert.equal(openTouch.mode, 'scroll', 'Open palm must activate scroll cleanly');
-  assert.equal(openTouch.events.filter(e => e.type === 'button').length, 0);
-
-  const openSwipeUp = s.feed('move', {}, {landmarks: hand('open', {y: -0.03})});
-  assert.equal(openSwipeUp.mode, 'scroll');
-  const openScrollEvent = openSwipeUp.events.find(e => e.type === 'scroll');
-  assert.ok(openScrollEvent && openScrollEvent.dy > 0, 'Open palm swiping up must scroll downward');
+  const openState = s.feed('move', {}, {landmarks: hand('open', {y: -0.03})});
+  assert.equal(openState.mode, 'move', 'Open palm must not scroll');
+  assert.equal(openState.events.filter(e => e.type === 'scroll' || e.type === 'button').length, 0);
 });
 
 test('pointerMode: index rapid double-click, independent Left and Right, Fist is strictly idle with zero click', () => {
   const s = session({pointerMode:'index', smoothing:1});
   s.hold('index');
 
-  // 1. Rapid double-click verification: two rapid taps fire 2 down and 2 up events without dwell lockout
+  // 1. Rapid double-click verification: press is instant, release is debounced by 2 frames
+  const btn = (states, down) => [states].flat().flatMap(r => r.events).some(e => e.type === 'button' && e.button === 'left' && e.down === down);
   const tap1Down = s.feed('index-left');
-  assert.ok(tap1Down.events.some(e => e.type === 'button' && e.button === 'left' && e.down));
-  const tap1Up = s.feed('index');
-  assert.ok(tap1Up.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
+  assert.ok(btn(tap1Down, true));
+  const tap1Up = [s.feed('index'), s.feed('index')];
+  assert.ok(btn(tap1Up, false));
 
   const tap2Down = s.feed('index-left');
-  assert.ok(tap2Down.events.some(e => e.type === 'button' && e.button === 'left' && e.down), 'Double-click 2nd tap must fire immediately');
-  const tap2Up = s.feed('index');
-  assert.ok(tap2Up.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
+  assert.ok(btn(tap2Down, true), 'Double-click 2nd tap must fire immediately');
+  const tap2Up = [s.feed('index'), s.feed('index')];
+  assert.ok(btn(tap2Up, false));
 
   // 2. Simultaneous Left + Right Click: when both Middle and Ring touch Thumb, BOTH buttons are down
   const bothState = s.feed('index-both');
@@ -474,13 +470,13 @@ test('pointerMode: index rapid double-click, independent Left and Right, Fist is
   assert.ok(bothState.events.some(e => e.type === 'button' && e.button === 'right' && e.down));
 
   // Releasing Ring only releases right, left remains down
-  const leftRemain = s.feed('index-left');
-  assert.ok(leftRemain.events.some(e => e.type === 'button' && e.button === 'right' && !e.down));
-  assert.ok(!leftRemain.events.some(e => e.type === 'button' && e.button === 'left'));
+  const leftRemain = [s.feed('index-left'), s.feed('index-left')].flatMap(r => r.events);
+  assert.ok(leftRemain.some(e => e.type === 'button' && e.button === 'right' && !e.down));
+  assert.ok(!leftRemain.some(e => e.type === 'button' && e.button === 'left'));
 
   // Releasing Middle releases left
-  const allRelease = s.feed('index');
-  assert.ok(allRelease.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
+  const allRelease = [s.feed('index'), s.feed('index')];
+  assert.ok(btn(allRelease, false));
 
   // 3. Clenched Fist: even with thumb touching curled fingers, it MUST BE IDLE and NEVER click!
   const fistStates = s.hold('fist');
@@ -495,6 +491,36 @@ test('pointerMode: index rapid double-click, independent Left and Right, Fist is
   const hRight = hand('index'); hRight[8] = {x: 0.28, y: 0.20, z: 0}; // mirroredX = 0.72 -> activePos.x = 1
   const rRight = s.feed('index', {}, {landmarks: hRight});
   assert.ok(Math.abs(rRight.activePos.x - 1) < 1e-5);
+});
+
+test('pointerMode: index drag survives posture glitches (index curl / fist flag / dropped frames) and single jitter frames', () => {
+  const s = session({pointerMode:'index', smoothing:1});
+  s.hold('index');
+  const press = s.feed('index-left');
+  assert.ok(press.events.some(e => e.type === 'button' && e.button === 'left' && e.down));
+
+  // Index curls while dragging (would be detected as fist/idle) -> still dragging
+  const curled = hand('index-left'); curled[8] = {x: 0.5, y: 0.65, z: 0};
+  const c = s.feed('index-left', {}, {landmarks: curled});
+  assert.equal(c.events.filter(e => e.type === 'button').length, 0, 'Index curl must not release drag');
+  assert.equal(c.mode, 'left');
+
+  // A dropped frame (no hand) -> still dragging
+  const lost = s.feed('index-left', {}, {landmarks: null});
+  assert.equal(lost.events.filter(e => e.type === 'button').length, 0, 'Dropped frame must not release drag');
+
+  // A single separated jitter frame -> still dragging
+  const jitter = s.feed('index');
+  assert.equal(jitter.events.filter(e => e.type === 'button').length, 0, 'Single jitter frame must not release drag');
+  const back = s.feed('index-left');
+  assert.equal(back.events.filter(e => e.type === 'button').length, 0);
+
+  // Handedness flicker -> still dragging
+  const flick = s.feed('index-left', {}, {handedness:'Left'});
+  assert.equal(flick.events.filter(e => e.type === 'button').length, 0, 'Handedness flicker must not release drag');
+
+  // HUD fingertips are the filtered copies and middle stays visible while held
+  assert.equal(flick.fingertips.middle.visible, true);
 });
 
 test('pointerMode: index fist safety gate blocks clicks when curled, and stabilizes all fingertips', () => {

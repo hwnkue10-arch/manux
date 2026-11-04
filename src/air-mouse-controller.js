@@ -130,6 +130,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   let mode = 'idle';
   let pinch = null;
   let anchor = null;
+  let gates = null;
 
   if (pointerMode === 'index') {
     // === ERGONOMIC PARADIGM: Absolute 1:1 Mapping + Pure Gesture 2 Scroll + Independent Clicks ===
@@ -141,15 +142,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     // 5. Simultaneous Click: If both touch thumb, BOTH left and right are active!
     // 6. Rest / Idle: Strictly Fist (주먹: all curled).
 
-    // === SCROLL GESTURE: Open Palm (🖐️ all fingers extended) OR clean V-sign (✌️) ===
-    // 100% collision-free: In Open Palm, Index, Middle, and Ring are ALL extended!
-    // During click (Left: Thumb+Middle, Right: Thumb+Ring), Ring/Pinky are curled into palm, so it NEVER triggers scroll!
-    const isOpenPalmScroll = allowVScroll &&
-      index && middle && ring &&
-      dist2D(points[8], points[0]) > palm * 1.10 &&
-      dist2D(points[12], points[0]) > palm * 1.10 &&
-      dist2D(points[16], points[0]) > palm * 1.00;
-
+    // === SCROLL GESTURE: clean V-sign (✌️) only. Open palm is the natural relaxed pose, so it must stay "move". ===
     const isVSignScroll = allowVScroll &&
       index && middle && !ring && !pinky &&
       dist2D(points[16], points[0]) < palm * 1.10 &&
@@ -157,18 +150,18 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
       dTwoFinger > 0.16 &&
       dMiddle > 0.40 && dRing > 0.40 && dIndex > 0.40;
 
-    const isScrollGesture = isOpenPalmScroll || isVSignScroll;
+    const isScrollGesture = isVSignScroll;
 
     // Intentional Pinch Stance: Clicks ONLY allowed when index is actively aiming and not scrolling
     const canClick = !isFist && !isScrollGesture && indexAiming;
 
     // Middle tip must be elevated/extended for an intentional pinch, not curled into palm
     const middlePinching = dist2D(points[12], points[0]) > palm * 0.88 && dist2D(points[4], points[0]) > palm * 0.60;
-    const isLeft = canClick && middlePinching && (dMiddle < (previousPinch === 'left' || previousPinch === 'both' ? 0.35 : 0.28));
+    const isLeft = canClick && middlePinching && dMiddle < 0.25;
 
     // Ring tip must be elevated/extended for an intentional pinch, not curled into palm
     const ringPinching = dist2D(points[16], points[0]) > palm * 0.85 && dist2D(points[4], points[0]) > palm * 0.60;
-    const isRight = canClick && ringPinching && (dRing < (previousPinch === 'right' || previousPinch === 'both' ? 0.35 : 0.28));
+    const isRight = canClick && ringPinching && dRing < 0.25;
 
     if (isFist) {
       mode = 'idle';
@@ -191,21 +184,17 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     }
 
     if (mode === 'scroll') {
-      anchor = isOpenPalmScroll
-        ? {
-            x: (points[8].x + points[12].x + points[16].x) / 3,
-            y: (points[8].y + points[12].y + points[16].y) / 3,
-          }
-        : {
-            x: (points[8].x + points[12].x) * 0.5,
-            y: (points[8].y + points[12].y) * 0.5,
-          };
+      anchor = {
+        x: (points[8].x + points[12].x) * 0.5,
+        y: (points[8].y + points[12].y) * 0.5,
+      };
     } else {
       anchor = {
         x: points[8].x,
         y: points[8].y,
       };
     }
+    gates = {isFist, isScrollGesture, canPressLeft: isLeft, canPressRight: isRight};
   } else {
     // === LEGACY PALM MODE: Open Palm Move + Rigid Palm Anchor ===
     const fingers = [
@@ -253,7 +242,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     ? (pinch === null)
     : (dIndex >= 0.44 && dMiddle >= 0.44);
 
-  return {mode, pinch, anchor, vScroll: isSmartphoneScroll, dIndex, dMiddle, dRing, dPinky, dTwoFinger, palm, fingertips, activePos, unpinched};
+  return {mode, pinch, anchor, gates, vScroll: isSmartphoneScroll, dIndex, dMiddle, dRing, dPinky, dTwoFinger, palm, fingertips, activePos, unpinched};
 }
 
 /** Pure landmark-to-input controller. It never sends OS events or stores camera data. */
@@ -324,8 +313,12 @@ export class AirMouseController {
     this.scrollOriginY = null;
     this.lastTouchY = null;
     this.leftReleaseFrames = 0;
+    this.scrollFrames = 0;
+    this.leftReleaseCount = 0;
+    this.rightReleaseCount = 0;
     this.lastFingertips = null;
     this.lastActivePos = null;
+    this.lastValidAt = null;
     this.euroU?.reset();
     this.euroV?.reset();
     this.euroThumbX?.reset();
@@ -363,6 +356,9 @@ export class AirMouseController {
     this.scrollOriginY = null;
     this.lastTouchY = null;
     this.leftReleaseFrames = 0;
+    this.scrollFrames = 0;
+    this.leftReleaseCount = 0;
+    this.rightReleaseCount = 0;
     this.euroU?.reset();
     this.euroV?.reset();
     this.euroThumbX?.reset();
@@ -395,10 +391,16 @@ export class AirMouseController {
     this.lastTime = now;
     const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll, this.pointerMode) : null;
     if (!observed) {
+      // Index mode: a few dropped/poor frames must not break an ongoing drag.
+      if (this.pointerMode === 'index' && (this.leftDown || this.rightDown) &&
+          this.lastValidAt !== null && now - this.lastValidAt < 300) {
+        return this.state('holding');
+      }
       this.lastHand = null;
       this.lastFingertips = this.lastActivePos = null;
       return this.interrupt('invalid');
     }
+    this.lastValidAt = now;
     if (this.pointerMode === 'index' && observed.fingertips) {
       const thm = observed.fingertips.thumb;
       const mid = observed.fingertips.middle;
@@ -417,7 +419,8 @@ export class AirMouseController {
       this.lastFingertips = observed.fingertips;
     }
     this.lastActivePos = observed.activePos;
-    const changedHand = handedness && this.lastHand && handedness !== this.lastHand;
+    // Index mode uses absolute mapping, so MediaPipe handedness flicker must not reset a drag.
+    const changedHand = this.pointerMode !== 'index' && handedness && this.lastHand && handedness !== this.lastHand;
     this.lastHand = handedness;
     if (gap || changedHand) return this.interrupt('tracking-reset');
 
@@ -430,39 +433,63 @@ export class AirMouseController {
     const events = [];
 
     if (this.pointerMode === 'index') {
-      // === ERGONOMIC INDEX MODE: Absolute 1:1 Pointer + Independent Instant Clicks ===
-      this.mode = observed.mode;
-      this.pinch = observed.pinch;
+      // === ERGONOMIC INDEX MODE: Absolute 1:1 Pointer + Debounced Sticky Buttons ===
+      // Press: instant when the gate says the fingers touch (keeps native double-click fast).
+      // Hold: once pressed, posture changes (index bending, fist detection, finger leaving HUD)
+      //       NEVER release the button. Only a clear finger separation for RELEASE_FRAMES does.
+      const g = observed.gates;
+      const RELEASE_RATIO = 0.42;
+      const RELEASE_FRAMES = 2;
 
-      if (this.mode === 'scroll') {
-        // Strict Scroll Rule: Left & Right clicks are 100% blocked during scroll!
-        if (this.leftDown) {
-          events.push({type: 'button', button: 'left', down: false});
-          this.leftDown = false;
-        }
-        if (this.rightDown) {
-          events.push({type: 'button', button: 'right', down: false});
-          this.rightDown = false;
-        }
-      } else if (this.mode !== 'idle') {
-        // Independent Left Button (Thumb + Middle)
-        const wantLeft = (this.mode === 'left' || this.mode === 'both');
-        if (wantLeft !== this.leftDown) {
-          this.leftDown = wantLeft;
-          events.push({type: 'button', button: 'left', down: wantLeft});
-          if (wantLeft) {
-            this.dragDisplacement = 0;
-            this.dragUnlocked = false;
-            this.lockPos = null;
+      // Scroll requires a stable V-sign for 3 frames and can never start while a button is held.
+      if (g.isScrollGesture && !this.leftDown && !this.rightDown) this.scrollFrames++;
+      else this.scrollFrames = 0;
+      const scrolling = this.scrollFrames >= 3;
+
+      if (this.leftDown) {
+        if (observed.dMiddle > RELEASE_RATIO) {
+          if (++this.leftReleaseCount >= RELEASE_FRAMES) {
+            this.leftDown = false;
+            this.leftReleaseCount = 0;
+            events.push({type: 'button', button: 'left', down: false});
           }
-        }
+        } else this.leftReleaseCount = 0;
+      } else if (g.canPressLeft && !scrolling) {
+        this.leftDown = true;
+        this.leftReleaseCount = 0;
+        this.dragDisplacement = 0;
+        this.dragUnlocked = false;
+        this.lockPos = null;
+        events.push({type: 'button', button: 'left', down: true});
+      }
 
-        // Independent Right Button (Thumb + Ring)
-        const wantRight = (this.mode === 'right' || this.mode === 'both');
-        if (wantRight !== this.rightDown) {
-          this.rightDown = wantRight;
-          events.push({type: 'button', button: 'right', down: wantRight});
-        }
+      if (this.rightDown) {
+        if (observed.dRing > RELEASE_RATIO) {
+          if (++this.rightReleaseCount >= RELEASE_FRAMES) {
+            this.rightDown = false;
+            this.rightReleaseCount = 0;
+            events.push({type: 'button', button: 'right', down: false});
+          }
+        } else this.rightReleaseCount = 0;
+      } else if (g.canPressRight && !scrolling) {
+        this.rightDown = true;
+        this.rightReleaseCount = 0;
+        events.push({type: 'button', button: 'right', down: true});
+      }
+
+      if (scrolling) this.mode = 'scroll';
+      else if (this.leftDown && this.rightDown) this.mode = 'both';
+      else if (this.leftDown) this.mode = 'left';
+      else if (this.rightDown) this.mode = 'right';
+      else if (g.isFist) this.mode = 'idle';
+      else this.mode = 'move';
+      this.pinch = this.mode === 'both' || this.mode === 'left' || this.mode === 'right' ? this.mode : null;
+
+      // While a button is held, keep the touching finger visible on the HUD even if it curls.
+      if (this.lastFingertips) {
+        if (this.leftDown && this.lastFingertips.middle) this.lastFingertips.middle.visible = true;
+        if (this.rightDown && this.lastFingertips.ring) this.lastFingertips.ring.visible = true;
+        if ((this.leftDown || this.rightDown) && this.lastFingertips.thumb) this.lastFingertips.thumb.visible = true;
       }
 
       if (this.mode === 'idle') {
@@ -533,7 +560,7 @@ export class AirMouseController {
       }
 
       return this.state('active', events, 1, {
-        fingertips: observed.fingertips,
+        fingertips: this.lastFingertips,
         activePos: observed.activePos,
         dIndex: observed.dIndex,
         dMiddle: observed.dMiddle,
