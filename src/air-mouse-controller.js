@@ -12,6 +12,13 @@ function straight(a, b, c) {
   return length > 1e-8 && (u.x * v.x + u.y * v.y + u.z * v.z) / length < -0.70;
 }
 
+function cos2D(a, b, c) {
+  const ux = a.x - b.x, uy = a.y - b.y;
+  const vx = c.x - b.x, vy = c.y - b.y;
+  const length = Math.hypot(ux, uy) * Math.hypot(vx, vy);
+  return length > 1e-8 ? (ux * vx + uy * vy) / length : 0;
+}
+
 class LowPassFilter {
   constructor(alpha = 1) {
     this.alpha = alpha;
@@ -88,14 +95,13 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     y: (isIndexLike ? clamp(p.y, 0, 1) : p.y) * height / width,
     z: p.z ?? 0
   }));
-  const palm2D = Math.max(dist2D(points[0], points[9]), dist2D(points[5], points[17]));
-  const palm3D = Math.max(distance(points[0], points[9]), distance(points[5], points[17]) * 1.15);
-  if (palm2D < 0.025 || palm3D < 0.025 || palm3D > 0.8) return null;
-  const palmScale = palm3D;
-  const palm = palm2D;
+  const palm = Math.max(dist2D(points[0], points[9]), dist2D(points[5], points[17]));
+  if (palm < 0.025 || palm > 0.8) return null;
+  const palmScale = palm;
 
   const extended = base => straight(points[base], points[base + 1], points[base + 3]) &&
-    distance(points[base + 3], points[0]) > distance(points[base + 1], points[0]) * 1.12;
+    dist2D(points[base + 3], points[base]) > dist2D(points[base + 1], points[base]) * 1.32 &&
+    dist2D(points[base + 3], points[0]) > dist2D(points[base + 1], points[0]) * 1.05;
   const index = extended(5), middle = extended(9), ring = extended(13), pinky = extended(17);
   const ratio = tip => dist2D(points[4], points[tip]) / palm;
   const dIndex = ratio(8);
@@ -104,38 +110,51 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const dPinky = ratio(20);
   const dTwoFinger = dist2D(points[8], points[12]) / palm;
 
-  // Clenched fingers count: fingers curled tightly into palm (in 3D hand space)
-  const clenchedCount = [
-    {tip: 8, base: 5},
-    {tip: 12, base: 9},
-    {tip: 16, base: 13},
-    {tip: 20, base: 17}
-  ].filter(({tip, base}) => distance(points[tip], points[base]) < palmScale * 0.48 || distance(points[tip], points[0]) < palmScale * 1.05).length;
+  // Clenched fingers count: fingers curled tightly into palm
+  const clenchedCount = [8, 12, 16, 20].filter(tip => dist2D(points[tip], points[0]) < palm * 1.05).length;
+  // In index-like modes, index finger aiming away from knuckle
+  const indexAiming = index && (dist2D(points[8], points[5]) > dist2D(points[6], points[5]) * 1.45 || dist2D(points[8], points[0]) > palm * 1.10);
 
-  // In index-like modes, index finger aiming away from palm/knuckle
-  const indexAiming = index && (distance(points[8], points[0]) > palmScale * 1.05 || distance(points[8], points[5]) > palmScale * 0.60);
+  // === JOINT-ANGLE & RELATIVE OUTWARD PROGRESSION (Thumb & Pinky) ===
+  // Works identically in frontal palm view AND angled/forward fist view (photo angle):
+  // 1. Thumb (LM 1->2->3->4):
+  //    When bent/hooked (even on the outside of a fist), joint 2-3-4 bends and tip (4) hooks toward index PIP (6).
+  //    When unfolded/extended, joints 2-3-4 & 1-2-4 straighten AND tip (4) projects further than IP (3)
+  //    away from thumb MCP (2), index MCP (5), index PIP (6), and middle MCP (9).
+  const wasThumbDown = previousPinch === 'left' || previousPinch === 'both';
+  const thCos234 = cos2D(points[2], points[3], points[4]);
+  const thCos124 = cos2D(points[1], points[2], points[4]);
+  const thReach2 = dist2D(points[4], points[2]) / Math.max(1e-5, dist2D(points[3], points[2]));
+  const thOut5 = dist2D(points[4], points[5]) / Math.max(1e-5, dist2D(points[3], points[5]));
+  const thOut6 = dist2D(points[4], points[6]) / Math.max(1e-5, dist2D(points[3], points[6]));
+  const thOut9 = dist2D(points[4], points[9]) / Math.max(1e-5, dist2D(points[3], points[9]));
+  const d3ThumbWrist = dist2D(points[4], points[0]) / palm;
+  const d3ThumbIndexMCP = dist2D(points[4], points[5]) / palm;
+  const d3ThumbToKnuckles = Math.min(dist2D(points[4], points[5]), dist2D(points[4], points[6]), dist2D(points[4], points[9])) / palm;
 
-  // 3D Invariant Thumb Metrics: invariant to webcam angle and hand tilt (pitch, roll, yaw)
-  const d3ThumbWrist = distance(points[4], points[0]) / palmScale;
-  const d3ThumbIndexMCP = distance(points[4], points[5]) / palmScale;
-  const d3ThumbMiddleMCP = distance(points[4], points[9]) / palmScale;
-  const d3ThumbIndexPIP = distance(points[4], points[6]) / palmScale;
-  const d3ThumbToKnuckles = Math.min(d3ThumbIndexMCP, d3ThumbMiddleMCP);
+  const thumbExtended = wasThumbDown
+    ? (thCos234 < -0.18 && thCos124 < -0.22 && thReach2 > 1.36 && thOut5 > 1.05 && thOut6 > 1.05 && thOut9 > 1.05 && d3ThumbToKnuckles > 0.15)
+    : (thCos234 < -0.32 && thCos124 < -0.38 && thReach2 > 1.48 && thOut5 > 1.15 && thOut6 > 1.15 && thOut9 > 1.15 && d3ThumbToKnuckles > 0.18);
 
-  // Thumb is extended when tip is cleared away from index knuckle, middle knuckle, and index PIP joint
-  const thumbExtended = (d3ThumbToKnuckles > 0.46 && d3ThumbWrist > 0.70 && d3ThumbIndexPIP > 0.38) ||
-                        (d3ThumbToKnuckles > 0.55 && d3ThumbWrist > 0.66);
+  // 2. Pinky (LM 17->18->19->20):
+  //    Measured along the pinky finger itself (independent of wrist foreshortening):
+  //    Joint 17-18-20 uncurls and tip (20) extends past PIP (18) and DIP (19) away from MCP (17) and Ring MCP (13).
+  const wasPinkyDown = previousPinch === 'right' || previousPinch === 'both';
+  const pkCos = cos2D(points[17], points[18], points[20]);
+  const pkReach18 = dist2D(points[20], points[17]) / Math.max(1e-5, dist2D(points[18], points[17]));
+  const pkReach19 = dist2D(points[20], points[17]) / Math.max(1e-5, dist2D(points[19], points[17]));
+  const pkOut13 = dist2D(points[20], points[13]) / Math.max(1e-5, dist2D(points[18], points[13]));
+  const d3PinkyMCP = dist2D(points[20], points[17]) / palm;
+  const d3PinkyWrist = dist2D(points[20], points[0]) / palm;
+  const pinkyStraight = pkCos < -0.40;
 
-  // 3D Invariant Pinky Metrics: casual relaxed or straight extension
-  const d3PinkyMCP = distance(points[20], points[17]) / palmScale;
-  const d3PinkyWrist = distance(points[20], points[0]) / palmScale;
-  const pinkyStraight = straight(points[17], points[18], points[20]);
-  const pinkyExtended = (pinkyStraight && d3PinkyMCP > 0.45) ||
-                        (d3PinkyMCP > 0.52 && d3PinkyWrist > 0.75) ||
-                        (d3PinkyMCP > 0.65);
+  const pinkyExtended = wasPinkyDown
+    ? (pkCos < -0.25 && pkReach18 > 1.25 && pkReach19 > 0.98 && pkOut13 > 1.02)
+    : (pkCos < -0.40 && pkReach18 > 1.35 && pkReach19 > 1.03 && pkOut13 > 1.06);
 
+  const triggerAllFourFolded = !indexAiming && !middle && !ring && !pinkyExtended;
   const isFist = pointerMode === 'trigger'
-    ? (clenchedCount >= 4 && !thumbExtended && !pinkyExtended)
+    ? (triggerAllFourFolded && !thumbExtended)
     : pointerMode === 'index'
     ? (!indexAiming || clenchedCount >= 4)
     : (clenchedCount >= 2);

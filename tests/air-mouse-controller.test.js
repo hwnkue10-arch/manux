@@ -655,3 +655,61 @@ test('pointerMode: trigger V-sign scrolls smoothly and full fist is idle', () =>
   assert.equal(pFist.mode, 'idle');
   assert.equal(pFist.events.filter(e => e.type === 'button' || e.type === 'scroll').length, 0);
 });
+
+test('pointerMode: trigger angled forward fist (dorsal view) rejects bent thumb and detects thumb/pinky unfolding', () => {
+  const s = session({pointerMode:'trigger', smoothing:1});
+  s.hold('trigger');
+
+  // Construct dorsal/angled fist posture where thumb is bent downward on outside of index finger
+  const makeAngledHand = () => {
+    const pts = hand('fist');
+    pts[0] = {x: 0.56, y: 0.85, z: 0};
+    pts[1] = {x: 0.48, y: 0.65, z: 0};
+    pts[2] = {x: 0.35, y: 0.36, z: 0};
+    pts[3] = {x: 0.28, y: 0.33, z: 0};
+    pts[4] = {x: 0.29, y: 0.47, z: 0}; // Bent downward on outside of fist (must NOT click!)
+    pts[5] = {x: 0.36, y: 0.28, z: 0};
+    pts[6] = {x: 0.33, y: 0.42, z: 0};
+    pts[7] = {x: 0.36, y: 0.52, z: 0};
+    pts[8] = {x: 0.41, y: 0.50, z: 0};
+    pts[9] = {x: 0.43, y: 0.35, z: 0};
+    pts[10] = {x: 0.40, y: 0.48, z: 0};
+    pts[11] = {x: 0.42, y: 0.56, z: 0};
+    pts[12] = {x: 0.45, y: 0.54, z: 0};
+    pts[13] = {x: 0.48, y: 0.45, z: 0};
+    pts[14] = {x: 0.43, y: 0.58, z: 0};
+    pts[15] = {x: 0.45, y: 0.65, z: 0};
+    pts[16] = {x: 0.48, y: 0.62, z: 0};
+    pts[17] = {x: 0.52, y: 0.58, z: 0};
+    pts[18] = {x: 0.43, y: 0.72, z: 0};
+    pts[19] = {x: 0.47, y: 0.76, z: 0};
+    pts[20] = {x: 0.51, y: 0.74, z: 0};
+    return pts;
+  };
+
+  // 1. Bent thumb on angled fist must NEVER be judged as extended
+  const bentState = s.feed('fist', {}, {landmarks: makeAngledHand()});
+  assert.notEqual(bentState.mode, 'left', 'Bent thumb must not trigger left click');
+  assert.equal(bentState.events.filter(e => e.type === 'button').length, 0);
+
+  // 2. Unfolding thumb outward in the angled view triggers Left Click
+  const thumbOpen = makeAngledHand();
+  thumbOpen[4] = {x: 0.20, y: 0.25, z: 0};
+  const openState = s.feed('fist', {}, {landmarks: thumbOpen});
+  assert.equal(openState.mode, 'left');
+  assert.ok(openState.events.some(e => e.type === 'button' && e.button === 'left' && e.down));
+
+  // 3. Bending thumb back down releases Left Click cleanly (after 2 debounce frames)
+  s.feed('fist', {}, {landmarks: makeAngledHand()});
+  const releaseState = s.feed('fist', {}, {landmarks: makeAngledHand()});
+  assert.ok(releaseState.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
+
+  // 4. Unfolding pinky in the angled view triggers Right Click
+  const pinkyOpen = makeAngledHand();
+  pinkyOpen[18] = {x: 0.46, y: 0.70, z: 0};
+  pinkyOpen[19] = {x: 0.40, y: 0.80, z: 0};
+  pinkyOpen[20] = {x: 0.34, y: 0.88, z: 0};
+  const rState = s.feed('fist', {}, {landmarks: pinkyOpen});
+  assert.equal(rState.mode, 'right');
+  assert.ok(rState.events.some(e => e.type === 'button' && e.button === 'right' && e.down));
+});
