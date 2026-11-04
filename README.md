@@ -17,7 +17,7 @@
     <img src="https://img.shields.io/badge/Win32_API-SendInput_(0x8001_Absolute)-0078D6?style=flat-square&logo=windows&logoColor=white" alt="Win32 API" />
     <img src="https://img.shields.io/badge/Motion_Filter-1€_Filter_%2B_Deadband-E9711C?style=flat-square" alt="1€ Filter" />
     <img src="https://img.shields.io/badge/Platform-Windows_10_%2F_11-0078D6?style=flat-square&logo=windows&logoColor=white" alt="Windows" />
-    <img src="https://img.shields.io/badge/Tests-43_Passed_(100%25)-22c55e?style=flat-square" alt="Tests" />
+    <img src="https://img.shields.io/badge/Tests-44_Passed_(100%25)-22c55e?style=flat-square" alt="Tests" />
     <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="License" />
   </p>
 
@@ -131,8 +131,9 @@
 * **Biomechanical Normalization**: 손목(`LM 0`) ~ 중지 뿌리(`LM 9`) 유클리드 거리를 기준으로 핀치 임계값을 동적 정규화하여 카메라와의 거리에 무관한 균일한 감도 보장
 
 ### 2. Motion & Ergonomics Filtering
-* **One Euro Filter ($1€$ Filter)**: 저속 정지 시 커트오프 주파수($f_c = 0.25\text{Hz}$)로 미세 떨림 차단, 고속 이동 시 적응형 파라미터($\beta = 9.0$)로 지연 시간 0ms 달성
+* **전 관절 One Euro Filter ($1€$ Filter)**: 검지 포인터뿐만 아니라 HUD 오버레이의 엄지, 중지, 약지, 소지 전 관절 랜드마크에 독립 $1€$ 필터를 적용하여 호버링 및 핀치 선 렌더링 시 떨림 0% 달성
 * **Stationary Tremor Deadband**: 2.5px 이내의 미세 센서 노이즈 무시
+* **Fist Disappearance & Click Safety Gate**: 주먹(Fist) 또는 검지가 굽혀진 휴식 상태 감지 시 투명 HUD 오버레이의 모든 손가락 관절 및 레이저 라인이 즉시 소멸되며, 2D 관절 근접으로 인한 오클릭을 원천 차단
 * **16px Click-Freeze Lock**: 핀치 체결 직후 16px 이내 커서 잠금으로 더블클릭 시 빗나감 방지
 
 ### 3. Desktop Shell & Transparent Overlay
@@ -148,10 +149,10 @@
 
 ## 🧪 테스트 및 품질 검증
 
-본 프로젝트는 안전한 입력 제어와 제스처 무결성을 위해 43개의 자동화 테스트 및 Windows SendInput 드라이버 드라이런 검증을 내장하고 있습니다.
+본 프로젝트는 안전한 입력 제어와 제스처 무결성을 위해 44개의 자동화 테스트 및 Windows SendInput 드라이버 드라이런 검증을 내장하고 있습니다.
 
 ```powershell
-# 단위 테스트 (AirMouseController, Desktop IPC, 제스처 상태 기계 43개 전원 통과)
+# 단위 테스트 (AirMouseController, Desktop IPC, 제스처 상태 기계 44개 전원 통과)
 npm test
 
 # Windows 네이티브 SendInput 드라이버 안전성 검증 (dry-run 모드로 실제 커서 간섭 없이 검증)

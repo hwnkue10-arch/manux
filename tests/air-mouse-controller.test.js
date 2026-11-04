@@ -485,3 +485,27 @@ test('pointerMode: index rapid double-click, independent Left and Right, Fist is
   const rRight = s.feed('index', {}, {landmarks: hRight});
   assert.ok(Math.abs(rRight.activePos.x - 1) < 1e-5);
 });
+
+test('pointerMode: index fist safety gate blocks clicks when curled, and stabilizes all fingertips', () => {
+  const s = session({pointerMode:'index', smoothing:1});
+  s.hold('index');
+
+  // Pointing gesture where middle is curled into palm (< 0.88 palm) and thumb touches curled middle:
+  const pointing = hand('index');
+  pointing[4] = {...pointing[12]};
+  const pointState = s.feed('index', {}, {landmarks: pointing});
+  assert.equal(pointState.mode, 'move', 'Curled middle touching thumb in pointing stance must not trigger click');
+  assert.equal(pointState.events.filter(e => e.type === 'button').length, 0);
+
+  // Curled index (making a fist / relaxed hand):
+  const curled = hand('index');
+  curled[8] = {x: 0.5, y: 0.65, z: 0};
+  const curledState = s.feed('index', {}, {landmarks: curled});
+  assert.equal(curledState.mode, 'idle', 'Curling index finger must enter idle rest mode immediately');
+  assert.equal(curledState.events.filter(e => e.type === 'button').length, 0);
+
+  // All fingertips in index mode are returned filtered
+  assert.ok(pointState.fingertips.thumb && Number.isFinite(pointState.fingertips.thumb.x));
+  assert.ok(pointState.fingertips.middle && Number.isFinite(pointState.fingertips.middle.x));
+  assert.ok(pointState.fingertips.ring && Number.isFinite(pointState.fingertips.ring.x));
+});

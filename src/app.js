@@ -366,10 +366,10 @@ function processResult(packet, now, roundTripMs) {
     const mouseQualityOk = handPresent && !quality.degenerate && quality.spanPx >= 30;
     const state = mouse.update({landmarks, now, quality:mouseQualityOk, handedness:result.handedness?.[0]?.[0]?.categoryName || null, ...dimensions, latency:roundTripMs});
     $('#recognition-label').textContent = !handPresent ? '손을 보여주세요' : !mouseQualityOk ? '입력 보류' : $('#mouse-mode').textContent;
-    $('#confidence').textContent = '검지 포인터 · 엄지+중지(좌클) · 엄지+소지(우클)';
+    $('#confidence').textContent = '검지 포인터 · 엄지+중지(좌클) · 엄지+약지(우클)';
     $('#hold-progress').style.width = `${Math.round((state?.progress || 0) * 100)}%`;
     if (!mouseQualityOk) message('#camera-message', qualityText(quality, handPresent));
-    else message('#camera-message', '👆 검지 포인터 이동 · 🤏 엄지+중지 좌클릭 · 👆 엄지+소지 우클릭 · ✌️ 폰 스크롤');
+    else message('#camera-message', '👆 검지 포인터 이동 · 🤏 엄지+중지 좌클릭 · 👆 엄지+약지 우클릭 · ✌️ 폰 스크롤');
     return;
   }
   const state = gate.update({gesture, score, now, handPresent, neutral, quality:quality.ok, enabled:$('#gesture-enabled').checked});

@@ -312,6 +312,11 @@ export class MouseWorkspace {
 
     if (!state?.fingertips) return;
 
+    // Safety Gate: All fingers and reticles disappear completely in fist / rest (idle mode)
+    if (state.mode === 'idle') {
+      return;
+    }
+
     // Deadzone-free compact active zone mapping to screen pixels
     const mapPoint = pt => {
       const mirroredX = 1.0 - pt.x;

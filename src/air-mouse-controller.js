@@ -102,9 +102,11 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
   // Clenched fingers count: fingers curled tightly into palm
   const clenchedCount = [8, 12, 16, 20].filter(tip => dist2D(points[tip], points[0]) < palm * 1.05).length;
-  // In index mode, if index is extended pointing up, it is NEVER a fist! Only curled index + clenched fingers count as fist.
+  // In index mode, index finger must be extended and aiming up away from wrist
+  const indexAiming = index && dist2D(points[8], points[0]) > palm * 1.10;
+  // In index mode, if index is curled or all fingers are clenched, it is strictly a fist / rest
   const isFist = pointerMode === 'index'
-    ? (!index && (clenchedCount >= 3 || (!middle && clenchedCount >= 2)))
+    ? (!indexAiming || clenchedCount >= 4)
     : (clenchedCount >= 2);
 
   // Reachable pinch tips must extend away from the wrist, and thumb must extend from wrist
@@ -147,11 +149,16 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
       dTwoFinger > 0.16 &&
       dMiddle > 0.40 && dRing > 0.40 && dIndex > 0.40;
 
-    // Independent Left Click: Thumb + Middle touch (ONLY when NOT scrolling and NOT in fist)
-    const isLeft = !isFist && !isScrollGesture && (dMiddle < (previousPinch === 'left' || previousPinch === 'both' ? 0.35 : 0.28));
+    // Intentional Pinch Stance: Clicks ONLY allowed when index is actively aiming and not scrolling
+    const canClick = !isFist && !isScrollGesture && indexAiming;
 
-    // Independent Right Click: Thumb + Ring touch (ONLY when NOT scrolling and NOT in fist)
-    const isRight = !isFist && !isScrollGesture && (dRing < (previousPinch === 'right' || previousPinch === 'both' ? 0.35 : 0.28));
+    // Middle tip must be elevated/extended for an intentional pinch, not curled into palm
+    const middlePinching = dist2D(points[12], points[0]) > palm * 0.88 && dist2D(points[4], points[0]) > palm * 0.60;
+    const isLeft = canClick && middlePinching && (dMiddle < (previousPinch === 'left' || previousPinch === 'both' ? 0.35 : 0.28));
+
+    // Ring tip must be elevated/extended for an intentional pinch, not curled into palm
+    const ringPinching = dist2D(points[16], points[0]) > palm * 0.85 && dist2D(points[4], points[0]) > palm * 0.60;
+    const isRight = canClick && ringPinching && (dRing < (previousPinch === 'right' || previousPinch === 'both' ? 0.35 : 0.28));
 
     if (isFist) {
       mode = 'idle';
@@ -248,6 +255,14 @@ export class AirMouseController {
     this.gainY = Number.isFinite(gainY) ? gainY : 1.0;
     this.euroU = new OneEuroFilter({minCutoff: 0.25, beta: 9.0});
     this.euroV = new OneEuroFilter({minCutoff: 0.25, beta: 9.0});
+    this.euroThumbX = new OneEuroFilter({minCutoff: 0.35, beta: 8.0});
+    this.euroThumbY = new OneEuroFilter({minCutoff: 0.35, beta: 8.0});
+    this.euroMiddleX = new OneEuroFilter({minCutoff: 0.35, beta: 8.0});
+    this.euroMiddleY = new OneEuroFilter({minCutoff: 0.35, beta: 8.0});
+    this.euroRingX = new OneEuroFilter({minCutoff: 0.35, beta: 8.0});
+    this.euroRingY = new OneEuroFilter({minCutoff: 0.35, beta: 8.0});
+    this.euroPinkyX = new OneEuroFilter({minCutoff: 0.35, beta: 8.0});
+    this.euroPinkyY = new OneEuroFilter({minCutoff: 0.35, beta: 8.0});
     this.lastEmittedU = null;
     this.lastEmittedV = null;
     this.lockPos = null;
@@ -293,6 +308,14 @@ export class AirMouseController {
     this.lastActivePos = null;
     this.euroU?.reset();
     this.euroV?.reset();
+    this.euroThumbX?.reset();
+    this.euroThumbY?.reset();
+    this.euroMiddleX?.reset();
+    this.euroMiddleY?.reset();
+    this.euroRingX?.reset();
+    this.euroRingY?.reset();
+    this.euroPinkyX?.reset();
+    this.euroPinkyY?.reset();
     this.lastEmittedU = null;
     this.lastEmittedV = null;
     this.lockPos = null;
@@ -322,6 +345,14 @@ export class AirMouseController {
     this.leftReleaseFrames = 0;
     this.euroU?.reset();
     this.euroV?.reset();
+    this.euroThumbX?.reset();
+    this.euroThumbY?.reset();
+    this.euroMiddleX?.reset();
+    this.euroMiddleY?.reset();
+    this.euroRingX?.reset();
+    this.euroRingY?.reset();
+    this.euroPinkyX?.reset();
+    this.euroPinkyY?.reset();
     this.lastEmittedU = null;
     this.lastEmittedV = null;
     this.lockPos = null;
@@ -348,7 +379,22 @@ export class AirMouseController {
       this.lastFingertips = this.lastActivePos = null;
       return this.interrupt('invalid');
     }
-    this.lastFingertips = observed.fingertips;
+    if (this.pointerMode === 'index' && observed.fingertips) {
+      const thm = observed.fingertips.thumb;
+      const mid = observed.fingertips.middle;
+      const rng = observed.fingertips.ring;
+      const pnk = observed.fingertips.pinky;
+      this.lastFingertips = {
+        index: observed.fingertips.index,
+        thumb: {x: this.euroThumbX.filter(thm.x, now), y: this.euroThumbY.filter(thm.y, now)},
+        middle: {x: this.euroMiddleX.filter(mid.x, now), y: this.euroMiddleY.filter(mid.y, now)},
+        ring: rng ? {x: this.euroRingX.filter(rng.x, now), y: this.euroRingY.filter(rng.y, now)} : null,
+        pinky: pnk ? {x: this.euroPinkyX.filter(pnk.x, now), y: this.euroPinkyY.filter(pnk.y, now)} : null,
+        wrist: observed.fingertips.wrist,
+      };
+    } else {
+      this.lastFingertips = observed.fingertips;
+    }
     this.lastActivePos = observed.activePos;
     const changedHand = handedness && this.lastHand && handedness !== this.lastHand;
     this.lastHand = handedness;
