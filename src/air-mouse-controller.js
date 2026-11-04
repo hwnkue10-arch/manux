@@ -245,7 +245,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const thumbExtended = !isVSignScroll && thStraight && thAbducted && thReach && thClearance;
 
   // 4. Pinky Extension (우클릭 - Right Click):
-  //    소지 3D 직선도(cos3D), 약지 분모 하한선 보정 pkVsRing, 약지 끝(16)과의 이격 거리 검증
+  //    소지 3D 직선도(cos3D), 심지굴근 연동에 따른 DIP 자연 굴곡 허용, 약지 대비 원위 전진 및 이격 검증
   const dPinkyMCP = distZDamped(points[20], points[17]) / palm;
   const dPinkyWrist = distZDamped(points[20], points[0]) / palm;
   const d3PinkyMCP = dPinkyMCP;
@@ -255,16 +255,19 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const ringSpan = Math.max(0.22 * palm, distZDamped(points[16], points[13]));
   const pkVsRing = distZDamped(points[20], points[17]) / ringSpan;
   const dPinkyRingTip = distZDamped(points[20], points[16]) / palm;
-  const pinkyStraight = pkCos < -0.45 && pkCosDIP < -0.40;
+
+  // 소지 직선도: MCP-PIP(pkCos)가 뻗어있고, 중/약지 주먹 결속으로 인한 DIP 미세 굴곡(pkCosDIP)은 유연하게 수용
+  const pkStraight = pkCos < (wasPinkyDown ? -0.25 : -0.36) && (pkCosDIP < (wasPinkyDown ? -0.15 : -0.22) || pkCos < -0.55);
+  const pinkyStraight = pkStraight;
 
   // 소지(Pinky) 전개 검증: 주먹으로 말려들어간 상태(isPinkyClenched) 완전 차단 및 너클 대비 +v 원위 전진 검증
   const isPinkyClenched = dist2D(points[20], points[0]) < palm * 0.95 && dist2D(points[20], points[17]) < palm * 0.38;
-  const pinkyForward = projV(points[20], points[17]) > (wasPinkyDown ? 0.04 : 0.14);
+  const pinkyForward = projV(points[20], points[17]) > (wasPinkyDown ? 0.03 : 0.06);
 
-  const pinkyExtended = !isVSignScroll && !isPinkyClenched && pinkyForward && (
+  const pinkyExtended = !isVSignScroll && !isPinkyClenched && pinkyForward && pkStraight && (
     wasPinkyDown
-      ? (pkCos < -0.32 && pkCosDIP < -0.28 && dPinkyMCP > 0.38 && pkVsRing > 1.15 && dPinkyRingTip > 0.28)
-      : (pkCos < -0.45 && pkCosDIP < -0.38 && dPinkyMCP > 0.44 && pkVsRing > 1.25 && dPinkyRingTip > 0.32)
+      ? (dPinkyMCP > 0.28 && pkVsRing > 1.08 && dPinkyRingTip > 0.20)
+      : (dPinkyMCP > 0.34 && pkVsRing > 1.16 && dPinkyRingTip > 0.24)
   );
 
   const triggerAllFourFolded = !indexAiming && !middleRaised && !pinkyExtended;

@@ -368,15 +368,15 @@ function processResult(packet, now, roundTripMs) {
     $('#recognition-label').textContent = !handPresent ? '손을 보여주세요' : !mouseQualityOk ? '입력 보류' : $('#mouse-mode').textContent;
     const pMode = mouse?.controller?.pointerMode ?? 'trigger';
     if (pMode === 'trigger') {
-      $('#confidence').textContent = '👆 검지 조준(접으면 정지) · 👍 엄지 좌클릭 · 🤙 소지 우클릭 · 🖐 스크롤';
+      $('#confidence').textContent = '👆조준 · 👍좌클 · 🤙우클 · 🖐휠';
       if (!mouseQualityOk) message('#camera-message', qualityText(quality, handPresent));
       else message('#camera-message', '👆 검지 조준 · 👍 엄지 좌클릭 · 🤙 소지 우클릭 · 🖐 손바닥 펴기 (휠 스크롤)');
     } else if (pMode === 'index') {
-      $('#confidence').textContent = '검지 포인터 · 엄지+중지(좌클) · 엄지+약지(우클) · ✌️ 스크롤';
+      $('#confidence').textContent = '👆포인터 · 🤏좌클 · 👆우클 · ✌️스크롤';
       if (!mouseQualityOk) message('#camera-message', qualityText(quality, handPresent));
       else message('#camera-message', '👆 검지 포인터 이동 · 🤏 엄지+중지 좌클릭 · 👆 엄지+약지 우클릭 · ✌️ 폰 스크롤');
     } else {
-      $('#confidence').textContent = '손바닥 포인터 · 엄지+검지(좌클) · 엄지+중지(우클)';
+      $('#confidence').textContent = '✋포인터 · 🤏좌클 · 👆우클';
       if (!mouseQualityOk) message('#camera-message', qualityText(quality, handPresent));
       else message('#camera-message', '✋ 손바닥 포인터 이동 · 🤏 엄지+검지 좌클릭 · 👆 엄지+중지 우클릭 · 🖐️ 폰 스크롤');
     }
