@@ -772,18 +772,28 @@ export class AirMouseController {
       observed.activePos.y = clamp(Number(filtV.toFixed(4)), 0, 1);
 
       if (this.mode === 'scroll') {
-        if (this.lastTouchY === null) {
-          this.lastTouchY = observed.anchor.y;
+        // === RATE-BASED AUTO-SCROLL ANCHOR (휠클릭 자동 스크롤 모드) ===
+        if (this.scrollAnchorY === null) {
+          this.scrollAnchorY = observed.anchor.y;
+          this.scrollAnchorX = observed.anchor.x;
+          this.remaining.y = 0;
         }
-        const motionY = observed.anchor.y - this.lastTouchY;
-        this.lastTouchY = observed.anchor.y;
-        if (Math.abs(motionY) > 0.0008) {
-          const scrollInput = -motionY * this.sensitivity * 1.6;
-          this.remaining.y += scrollInput;
-          const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
+        const anchorY = this.scrollAnchorY;
+        const offsetY = observed.anchor.y - anchorY;
+        const DEADZONE = 0.012; // ±12px deadzone around center anchor
+        let velocity = 0;
+        if (Math.abs(offsetY) > DEADZONE) {
+          const delta = offsetY > 0 ? (offsetY - DEADZONE) : (offsetY + DEADZONE);
+          velocity = delta * this.sensitivity * 0.45;
+        }
+        this.scrollVelocity = velocity;
+
+        if (Math.abs(velocity) > 0.01) {
+          this.remaining.y += velocity;
+          const wheel = clamp(Math.trunc(this.remaining.y / 4) * 4, -120, 120);
           if (wheel) {
             events.push({type: 'scroll', dy: wheel});
-            this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
+            this.remaining.y = clamp(this.remaining.y - wheel, -3.999, 3.999);
           }
         }
       } else {
