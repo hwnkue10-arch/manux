@@ -88,11 +88,14 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     y: (isIndexLike ? clamp(p.y, 0, 1) : p.y) * height / width,
     z: p.z ?? 0
   }));
-  const palm = Math.max(dist2D(points[0], points[9]), dist2D(points[5], points[17]));
-  if (palm < 0.025 || palm > 0.8) return null;
+  const palm2D = Math.max(dist2D(points[0], points[9]), dist2D(points[5], points[17]));
+  const palm3D = Math.max(distance(points[0], points[9]), distance(points[5], points[17]) * 1.15);
+  if (palm2D < 0.025 || palm3D < 0.025 || palm3D > 0.8) return null;
+  const palmScale = palm3D;
+  const palm = palm2D;
 
   const extended = base => straight(points[base], points[base + 1], points[base + 3]) &&
-    dist2D(points[base + 3], points[0]) > dist2D(points[base + 1], points[0]) * 1.12;
+    distance(points[base + 3], points[0]) > distance(points[base + 1], points[0]) * 1.12;
   const index = extended(5), middle = extended(9), ring = extended(13), pinky = extended(17);
   const ratio = tip => dist2D(points[4], points[tip]) / palm;
   const dIndex = ratio(8);
@@ -101,18 +104,35 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const dPinky = ratio(20);
   const dTwoFinger = dist2D(points[8], points[12]) / palm;
 
-  // Clenched fingers count: fingers curled tightly into palm
-  const clenchedCount = [8, 12, 16, 20].filter(tip => dist2D(points[tip], points[0]) < palm * 1.05).length;
-  // In index-like modes, index finger aiming up away from wrist
-  const indexAiming = index && dist2D(points[8], points[0]) > palm * 1.10;
+  // Clenched fingers count: fingers curled tightly into palm (in 3D hand space)
+  const clenchedCount = [
+    {tip: 8, base: 5},
+    {tip: 12, base: 9},
+    {tip: 16, base: 13},
+    {tip: 20, base: 17}
+  ].filter(({tip, base}) => distance(points[tip], points[base]) < palmScale * 0.48 || distance(points[tip], points[0]) < palmScale * 1.05).length;
 
-  const dThumbWrist = dist2D(points[4], points[0]) / palm;
-  const dThumbBase = dist2D(points[4], points[5]) / palm;
-  const thumbExtended = dThumbWrist > 0.80 && dThumbBase > 0.48;
+  // In index-like modes, index finger aiming away from palm/knuckle
+  const indexAiming = index && (distance(points[8], points[0]) > palmScale * 1.05 || distance(points[8], points[5]) > palmScale * 0.60);
 
-  const dPinkyWrist = dist2D(points[20], points[0]) / palm;
+  // 3D Invariant Thumb Metrics: invariant to webcam angle and hand tilt (pitch, roll, yaw)
+  const d3ThumbWrist = distance(points[4], points[0]) / palmScale;
+  const d3ThumbIndexMCP = distance(points[4], points[5]) / palmScale;
+  const d3ThumbMiddleMCP = distance(points[4], points[9]) / palmScale;
+  const d3ThumbIndexPIP = distance(points[4], points[6]) / palmScale;
+  const d3ThumbToKnuckles = Math.min(d3ThumbIndexMCP, d3ThumbMiddleMCP);
+
+  // Thumb is extended when tip is cleared away from index knuckle, middle knuckle, and index PIP joint
+  const thumbExtended = (d3ThumbToKnuckles > 0.46 && d3ThumbWrist > 0.70 && d3ThumbIndexPIP > 0.38) ||
+                        (d3ThumbToKnuckles > 0.55 && d3ThumbWrist > 0.66);
+
+  // 3D Invariant Pinky Metrics: casual relaxed or straight extension
+  const d3PinkyMCP = distance(points[20], points[17]) / palmScale;
+  const d3PinkyWrist = distance(points[20], points[0]) / palmScale;
   const pinkyStraight = straight(points[17], points[18], points[20]);
-  const pinkyExtended = pinkyStraight && dPinkyWrist > 0.98;
+  const pinkyExtended = (pinkyStraight && d3PinkyMCP > 0.45) ||
+                        (d3PinkyMCP > 0.52 && d3PinkyWrist > 0.75) ||
+                        (d3PinkyMCP > 0.65);
 
   const isFist = pointerMode === 'trigger'
     ? (clenchedCount >= 4 && !thumbExtended && !pinkyExtended)
@@ -155,8 +175,8 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     // V-sign scroll: Index + Middle extended, Ring & Pinky curled, Thumb NOT extended
     const isVSignScroll = allowVScroll &&
       index && middle && !ring && !pinky && !thumbExtended &&
-      dist2D(points[16], points[0]) < palm * 1.10 &&
-      dist2D(points[20], points[0]) < palm * 1.05 &&
+      distance(points[16], points[0]) < palmScale * 1.15 &&
+      distance(points[20], points[0]) < palmScale * 1.15 &&
       dTwoFinger > 0.16;
 
     const isScrollGesture = isVSignScroll;
@@ -209,9 +229,11 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
       thumbExtended,
       pinkyExtended,
       pinkyStraight,
-      dThumbWrist,
-      dThumbBase,
-      dPinkyWrist,
+      dThumbWrist: d3ThumbWrist,
+      dThumbBase: d3ThumbIndexMCP,
+      dPinkyWrist: d3PinkyWrist,
+      dPinkyMCP: d3PinkyMCP,
+      d3ThumbToKnuckles,
     };
   } else if (pointerMode === 'index') {
     // === ERGONOMIC PARADIGM: Absolute 1:1 Mapping + Pure Gesture 2 Scroll + Independent Clicks ===
@@ -380,6 +402,11 @@ export class AirMouseController {
     this.lockPos = null;
     this.frozenU = null;
     this.frozenV = null;
+    this.lastAimU = null;
+    this.lastAimV = null;
+    this.scrollAnchorX = null;
+    this.scrollAnchorY = null;
+    this.scrollVelocity = 0;
     this.fistFrames = 0;
     this.reset();
   }
@@ -440,6 +467,11 @@ export class AirMouseController {
     this.lockPos = null;
     this.frozenU = null;
     this.frozenV = null;
+    this.lastAimU = null;
+    this.lastAimV = null;
+    this.scrollAnchorX = null;
+    this.scrollAnchorY = null;
+    this.scrollVelocity = 0;
     this.fistFrames = 0;
     return this.state('disabled', [{type:'release'}]);
   }
@@ -481,10 +513,17 @@ export class AirMouseController {
     this.lastEmittedU = null;
     this.lastEmittedV = null;
     this.lockPos = null;
-    this.frozenU = null;
-    this.frozenV = null;
+    this.scrollAnchorX = null;
+    this.scrollAnchorY = null;
+    this.scrollVelocity = 0;
     this.fistFrames = 0;
-    if (disarm) this.armed = false;
+    if (disarm) {
+      this.armed = false;
+      this.frozenU = null;
+      this.frozenV = null;
+      this.lastAimU = null;
+      this.lastAimV = null;
+    }
     return this.state(phase, events);
   }
 
@@ -562,7 +601,7 @@ export class AirMouseController {
 
       // Left Click (Thumb trigger): instant press, 2-frame debounced release
       if (this.leftDown) {
-        if (g.dThumbWrist < 0.70 || g.dThumbBase < 0.40) {
+        if (!g.thumbExtended) {
           if (++this.leftReleaseCount >= 2) {
             this.leftDown = false;
             this.leftReleaseCount = 0;
@@ -580,7 +619,7 @@ export class AirMouseController {
 
       // Right Click (Pinky trigger): instant press, 2-frame debounced release
       if (this.rightDown) {
-        if (g.dPinkyWrist < 0.88 || !g.pinkyStraight) {
+        if (!g.pinkyExtended) {
           if (++this.rightReleaseCount >= 2) {
             this.rightDown = false;
             this.rightReleaseCount = 0;
@@ -642,67 +681,84 @@ export class AirMouseController {
 
       // Pointer coordinate calculation & freeze
       let filtU, filtV;
-      if (g.indexFolded && this.frozenU !== null && this.frozenV !== null) {
-        // Index is folded: hold cursor at frozen position
-        filtU = this.frozenU;
-        filtV = this.frozenV;
+      if (g.indexFolded) {
+        // Index is folded: hold cursor strictly at the last known aim coordinate
+        filtU = this.lastAimU ?? this.frozenU ?? this.lastEmittedU ?? 0.5;
+        filtV = this.lastAimV ?? this.frozenV ?? this.lastEmittedV ?? 0.5;
+        this.frozenU = filtU;
+        this.frozenV = filtV;
       } else {
         const rawU = observed.activePos.x;
         const rawV = observed.activePos.y;
         filtU = this.euroU.filter(rawU, now);
         filtV = this.euroV.filter(rawV, now);
+
+        // Click Freeze Lock: lock micro-displacement immediately following click until intentional drag
+        if (this.leftDown) {
+          if (!this.dragUnlocked) {
+            if (this.lockPos === null) {
+              this.lockPos = {u: filtU, v: filtV};
+            }
+            const dragDist = Math.hypot((filtU - this.lockPos.u) * 1920, (filtV - this.lockPos.v) * 1080);
+            if (dragDist < 16) {
+              filtU = this.lockPos.u;
+              filtV = this.lockPos.v;
+            } else {
+              this.dragUnlocked = true;
+            }
+          }
+        } else {
+          this.lockPos = null;
+        }
+
+        // Stationary Tremor Gate (Deadband)
+        if (this.lastEmittedU !== null && this.lastEmittedV !== null) {
+          const deltaPx = Math.hypot((filtU - this.lastEmittedU) * 1920, (filtV - this.lastEmittedV) * 1080);
+          if (deltaPx < 2.5 && !this.leftDown) {
+            filtU = this.lastEmittedU;
+            filtV = this.lastEmittedV;
+          }
+        }
+        this.lastEmittedU = filtU;
+        this.lastEmittedV = filtV;
+        this.lastAimU = filtU;
+        this.lastAimV = filtV;
         this.frozenU = filtU;
         this.frozenV = filtV;
       }
-
-      // Click Freeze Lock: lock micro-displacement immediately following click until intentional drag
-      if (this.leftDown) {
-        if (!this.dragUnlocked) {
-          if (this.lockPos === null) {
-            this.lockPos = {u: filtU, v: filtV};
-          }
-          const dragDist = Math.hypot((filtU - this.lockPos.u) * 1920, (filtV - this.lockPos.v) * 1080);
-          if (dragDist < 16) {
-            filtU = this.lockPos.u;
-            filtV = this.lockPos.v;
-          } else {
-            this.dragUnlocked = true;
-          }
-        }
-      } else {
-        this.lockPos = null;
-      }
-
-      // Stationary Tremor Gate (Deadband)
-      if (this.lastEmittedU !== null && this.lastEmittedV !== null) {
-        const deltaPx = Math.hypot((filtU - this.lastEmittedU) * 1920, (filtV - this.lastEmittedV) * 1080);
-        if (deltaPx < 2.5 && !this.leftDown) {
-          filtU = this.lastEmittedU;
-          filtV = this.lastEmittedV;
-        }
-      }
-      this.lastEmittedU = filtU;
-      this.lastEmittedV = filtV;
 
       observed.activePos.x = clamp(Number(filtU.toFixed(4)), 0, 1);
       observed.activePos.y = clamp(Number(filtV.toFixed(4)), 0, 1);
 
       if (this.mode === 'scroll') {
-        if (this.lastTouchY === null) {
-          this.lastTouchY = observed.anchor.y;
+        // === RATE-BASED AUTO-SCROLL ANCHOR (휠클릭 자동 스크롤 모드) ===
+        if (this.scrollAnchorY === null) {
+          this.scrollAnchorY = observed.anchor.y;
+          this.scrollAnchorX = observed.anchor.x;
+          this.remaining.y = 0;
         }
-        const motionY = observed.anchor.y - this.lastTouchY;
-        this.lastTouchY = observed.anchor.y;
-        if (Math.abs(motionY) > 0.0008) {
-          const scrollInput = -motionY * this.sensitivity * 1.6;
-          this.remaining.y += scrollInput;
-          const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
+        const anchorY = this.scrollAnchorY;
+        const offsetY = observed.anchor.y - anchorY;
+        const DEADZONE = 0.012; // ±12px deadzone around center anchor
+        let velocity = 0;
+        if (Math.abs(offsetY) > DEADZONE) {
+          const delta = offsetY > 0 ? (offsetY - DEADZONE) : (offsetY + DEADZONE);
+          velocity = delta * this.sensitivity * 0.45;
+        }
+        this.scrollVelocity = velocity;
+
+        if (Math.abs(velocity) > 0.01) {
+          this.remaining.y += velocity;
+          const wheel = clamp(Math.trunc(this.remaining.y / 4) * 4, -120, 120);
           if (wheel) {
             events.push({type: 'scroll', dy: wheel});
-            this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
+            this.remaining.y = clamp(this.remaining.y - wheel, -3.999, 3.999);
           }
         }
       } else {
+        this.scrollAnchorY = null;
+        this.scrollAnchorX = null;
+        this.scrollVelocity = 0;
         this.lastTouchY = null;
         events.push({type: 'moveTo', x: observed.activePos.x, y: observed.activePos.y});
       }
@@ -714,7 +770,9 @@ export class AirMouseController {
         dMiddle: observed.dMiddle,
         dRing: observed.dRing,
         dPinky: observed.dPinky,
-        dTwoFinger: observed.dTwoFinger
+        dTwoFinger: observed.dTwoFinger,
+        scrollAnchor: this.scrollAnchorY !== null ? {x: this.scrollAnchorX, y: this.scrollAnchorY} : null,
+        scrollVelocity: this.scrollVelocity || 0,
       });
     } else if (this.pointerMode === 'index') {
       // === ERGONOMIC INDEX MODE: Absolute 1:1 Pointer + Debounced Sticky Buttons ===
