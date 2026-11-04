@@ -501,68 +501,22 @@ export class MouseWorkspace {
         ctx.restore();
       }
 
-      // 4. Middle-Click Auto-Scroll Anchor Compass & Velocity Beam (✌️ V-sign)
-      if (state.mode === 'scroll') {
+      // 4. Middle & Scroll Beam (✌️ V-sign)
+      if (state.mode === 'scroll' && idx && mid) {
         ctx.save();
-        const anchor = state.scrollAnchor ? mapPoint(state.scrollAnchor) : (idx ?? {x: w / 2, y: h / 2});
-        const currentHand = (idx && mid) ? {x: (idx.x + mid.x) * 0.5, y: (idx.y + mid.y) * 0.5} : (idx ?? anchor);
-        const vel = state.scrollVelocity ?? 0;
-
-        // Draw Compass Circle (Middle-Click Origin)
-        ctx.fillStyle = 'rgba(192, 132, 252, 0.22)';
         ctx.strokeStyle = '#c084fc';
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 4;
+        ctx.setLineDash([4, 4]);
         ctx.shadowColor = '#c084fc';
-        ctx.shadowBlur = 18;
+        ctx.shadowBlur = 16;
         ctx.beginPath();
-        ctx.arc(anchor.x, anchor.y, 24, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.moveTo(idx.x, idx.y);
+        ctx.lineTo(mid.x, mid.y);
         ctx.stroke();
 
-        // Inner center point
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(anchor.x, anchor.y, 4, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Compass Up / Down Triangles
-        ctx.fillStyle = vel < -0.1 ? '#a855f7' : 'rgba(255, 255, 255, 0.7)';
-        ctx.beginPath();
-        ctx.moveTo(anchor.x, anchor.y - 19);
-        ctx.lineTo(anchor.x - 7, anchor.y - 10);
-        ctx.lineTo(anchor.x + 7, anchor.y - 10);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.fillStyle = vel > 0.1 ? '#a855f7' : 'rgba(255, 255, 255, 0.7)';
-        ctx.beginPath();
-        ctx.moveTo(anchor.x, anchor.y + 19);
-        ctx.lineTo(anchor.x - 7, anchor.y + 10);
-        ctx.lineTo(anchor.x + 7, anchor.y + 10);
-        ctx.closePath();
-        ctx.fill();
-
-        // Connecting tether from anchor to current hand
-        ctx.strokeStyle = 'rgba(192, 132, 252, 0.75)';
-        ctx.lineWidth = 3;
-        ctx.setLineDash([5, 5]);
-        ctx.beginPath();
-        ctx.moveTo(anchor.x, anchor.y);
-        ctx.lineTo(currentHand.x, currentHand.y);
-        ctx.stroke();
-
-        // Dynamic status text
+        ctx.fillStyle = '#c084fc';
         ctx.font = 'bold 13px "Segoe UI", sans-serif';
-        if (vel > 0.1) {
-          ctx.fillStyle = '#c084fc';
-          ctx.fillText(`▼ 아래로 자동 스크롤 (${Math.min(100, Math.round(Math.abs(vel) * 22))}%)`, anchor.x + 34, anchor.y + 6);
-        } else if (vel < -0.1) {
-          ctx.fillStyle = '#c084fc';
-          ctx.fillText(`▲ 위로 자동 스크롤 (${Math.min(100, Math.round(Math.abs(vel) * 22))}%)`, anchor.x + 34, anchor.y + 6);
-        } else {
-          ctx.fillStyle = '#e9d5ff';
-          ctx.fillText('🎯 스크롤 기준점 (손을 위/아래로 이동)', anchor.x + 34, anchor.y + 6);
-        }
+        ctx.fillText('✌️ 휠 스크롤 (V자)', (idx.x + mid.x) / 2 + 15, (idx.y + mid.y) / 2 - 10);
         ctx.restore();
       }
     } else {

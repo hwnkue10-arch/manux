@@ -19,6 +19,13 @@ function cos2D(a, b, c) {
   return length > 1e-8 ? (ux * vx + uy * vy) / length : 0;
 }
 
+function distToSegment(p, a, b) {
+  const vx = b.x - a.x, vy = b.y - a.y;
+  const lenSq = vx * vx + vy * vy;
+  const t = lenSq > 1e-8 ? clamp(((p.x - a.x) * vx + (p.y - a.y) * vy) / lenSq, 0, 1) : 0;
+  return Math.hypot(p.x - (a.x + t * vx), p.y - (a.y + t * vy));
+}
+
 class LowPassFilter {
   constructor(alpha = 1) {
     this.alpha = alpha;
@@ -112,47 +119,66 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
   // Clenched fingers count: fingers curled tightly into palm
   const clenchedCount = [8, 12, 16, 20].filter(tip => dist2D(points[tip], points[0]) < palm * 1.05).length;
-  // In index-like modes, index finger aiming away from knuckle
-  const indexAiming = index && (dist2D(points[8], points[5]) > dist2D(points[6], points[5]) * 1.45 || dist2D(points[8], points[0]) > palm * 1.10);
 
-  // === JOINT-ANGLE & RELATIVE OUTWARD PROGRESSION (Thumb & Pinky) ===
-  // Works identically in frontal palm view AND angled/forward fist view (photo angle):
+  // Multi-angle finger extension helper for Trigger mode (2D joint uncurl + reach past PIP)
+  const fingerOpen2D = base =>
+    (cos2D(points[base], points[base + 1], points[base + 3]) < -0.45 &&
+     dist2D(points[base + 3], points[base]) > dist2D(points[base + 1], points[base]) * 1.30) ||
+    extended(base);
+
+  const indexOpen = pointerMode === 'trigger' ? fingerOpen2D(5) : index;
+  const middleOpen = pointerMode === 'trigger'
+    ? (fingerOpen2D(9) && dist2D(points[12], points[9]) > dist2D(points[16], points[13]) * 1.22)
+    : middle;
+  const ringOpen = pointerMode === 'trigger'
+    ? (fingerOpen2D(13) && dist2D(points[16], points[13]) > palm * 0.48)
+    : ring;
+
+  // In index-like modes, index finger aiming away from knuckle
+  const indexAiming = indexOpen && (dist2D(points[8], points[5]) > dist2D(points[6], points[5]) * 1.32 || dist2D(points[8], points[0]) > palm * 1.10);
+
+  // V-sign posture (Index + Middle raised while Ring is curled)
+  const vSignPosture = indexAiming && middleOpen && !ringOpen;
+
+  // === MULTI-ANGLE THUMB ("엄지가위") & PINKY DETECTOR ===
   // 1. Thumb (LM 1->2->3->4):
-  //    When bent/hooked (even on the outside of a fist), joint 2-3-4 bends and tip (4) hooks toward index PIP (6).
-  //    When unfolded/extended, joints 2-3-4 & 1-2-4 straighten AND tip (4) projects further than IP (3)
-  //    away from thumb MCP (2), index MCP (5), index PIP (6), and middle MCP (9).
+  //    Measures perpendicular clearance from the Index-Palm Spine (segments 5-6 and 5-9) and IP joint (2-3-4) unbending.
+  //    Eliminates vertical offset artifacts when extending thumb upward, sideways, or at steep angles.
   const wasThumbDown = previousPinch === 'left' || previousPinch === 'both';
   const thCos234 = cos2D(points[2], points[3], points[4]);
-  const thCos124 = cos2D(points[1], points[2], points[4]);
   const thReach2 = dist2D(points[4], points[2]) / Math.max(1e-5, dist2D(points[3], points[2]));
-  const thOut5 = dist2D(points[4], points[5]) / Math.max(1e-5, dist2D(points[3], points[5]));
-  const thOut6 = dist2D(points[4], points[6]) / Math.max(1e-5, dist2D(points[3], points[6]));
+  const spineDist4 = Math.min(distToSegment(points[4], points[5], points[6]), distToSegment(points[4], points[5], points[9]));
+  const spineDist3 = Math.min(distToSegment(points[3], points[5], points[6]), distToSegment(points[3], points[5], points[9]));
+  const spineRatio = spineDist4 / Math.max(1e-5, spineDist3);
   const thOut9 = dist2D(points[4], points[9]) / Math.max(1e-5, dist2D(points[3], points[9]));
   const d3ThumbWrist = dist2D(points[4], points[0]) / palm;
   const d3ThumbIndexMCP = dist2D(points[4], points[5]) / palm;
-  const d3ThumbToKnuckles = Math.min(dist2D(points[4], points[5]), dist2D(points[4], points[6]), dist2D(points[4], points[9])) / palm;
+  const d3ThumbToKnuckles = spineDist4 / palm;
 
-  const thumbExtended = wasThumbDown
-    ? (thCos234 < -0.18 && thCos124 < -0.22 && thReach2 > 1.36 && thOut5 > 1.05 && thOut6 > 1.05 && thOut9 > 1.05 && d3ThumbToKnuckles > 0.15)
-    : (thCos234 < -0.32 && thCos124 < -0.38 && thReach2 > 1.48 && thOut5 > 1.15 && thOut6 > 1.15 && thOut9 > 1.15 && d3ThumbToKnuckles > 0.18);
+  const thumbOpenStandard = thCos234 < -0.18 && thReach2 > 1.28 && spineRatio > 0.98 && thOut9 > 1.04 && d3ThumbToKnuckles > 0.14;
+  const thumbOpenWide = thCos234 < -0.05 && thReach2 > 1.15 && spineRatio > 1.22 && thOut9 > 1.12 && d3ThumbToKnuckles > 0.24;
+  const thumbHold = wasThumbDown && thCos234 < -0.08 && thReach2 > 1.18 && spineRatio > 0.90 && thOut9 > 0.98 && d3ThumbToKnuckles > 0.12;
+  const thumbExtended = thumbOpenStandard || thumbOpenWide || thumbHold;
 
   // 2. Pinky (LM 17->18->19->20):
-  //    Measured along the pinky finger itself (independent of wrist foreshortening):
-  //    Joint 17-18-20 uncurls and tip (20) extends past PIP (18) and DIP (19) away from MCP (17) and Ring MCP (13).
+  //    Requires pinky to be uncurled, have real visible length from MCP (17), AND extend significantly
+  //    further than the adjacent curled Ring finger (16 vs 13). Suppressed during V-sign scroll posture!
   const wasPinkyDown = previousPinch === 'right' || previousPinch === 'both';
   const pkCos = cos2D(points[17], points[18], points[20]);
   const pkReach18 = dist2D(points[20], points[17]) / Math.max(1e-5, dist2D(points[18], points[17]));
   const pkReach19 = dist2D(points[20], points[17]) / Math.max(1e-5, dist2D(points[19], points[17]));
-  const pkOut13 = dist2D(points[20], points[13]) / Math.max(1e-5, dist2D(points[18], points[13]));
+  const pkVsRing = dist2D(points[20], points[17]) / Math.max(1e-5, dist2D(points[16], points[13]));
   const d3PinkyMCP = dist2D(points[20], points[17]) / palm;
   const d3PinkyWrist = dist2D(points[20], points[0]) / palm;
-  const pinkyStraight = pkCos < -0.40;
+  const pinkyStraight = pkCos < -0.38;
 
-  const pinkyExtended = wasPinkyDown
-    ? (pkCos < -0.25 && pkReach18 > 1.25 && pkReach19 > 0.98 && pkOut13 > 1.02)
-    : (pkCos < -0.40 && pkReach18 > 1.35 && pkReach19 > 1.03 && pkOut13 > 1.06);
+  const pinkyExtended = !vSignPosture && (
+    wasPinkyDown
+      ? (pkCos < -0.22 && pkReach18 > 1.22 && pkReach19 > 0.98 && pkVsRing > 1.10 && d3PinkyMCP > 0.26)
+      : (pkCos < -0.38 && pkReach18 > 1.32 && pkReach19 > 1.02 && pkVsRing > 1.18 && d3PinkyMCP > 0.30)
+  );
 
-  const triggerAllFourFolded = !indexAiming && !middle && !ring && !pinkyExtended;
+  const triggerAllFourFolded = !indexAiming && !middleOpen && !ringOpen && !pinkyExtended;
   const isFist = pointerMode === 'trigger'
     ? (triggerAllFourFolded && !thumbExtended)
     : pointerMode === 'index'
@@ -191,12 +217,8 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     // 5. Scroll: Index + Middle extended (✌️ V-sign), with Thumb and Pinky folded.
     // 6. Rest: Complete 5-finger fist (all 4 fingers curled AND thumb not extended).
 
-    // V-sign scroll: Index + Middle extended, Ring & Pinky curled, Thumb NOT extended
-    const isVSignScroll = allowVScroll &&
-      index && middle && !ring && !pinky && !thumbExtended &&
-      distance(points[16], points[0]) < palmScale * 1.15 &&
-      distance(points[20], points[0]) < palmScale * 1.15 &&
-      dTwoFinger > 0.16;
+    // V-sign scroll: Index + Middle extended, Ring curled, Thumb NOT extended
+    const isVSignScroll = allowVScroll && vSignPosture && !thumbExtended;
 
     const isScrollGesture = isVSignScroll;
 
@@ -351,7 +373,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     fingertips = {
       index: {x: points[8].x, y: points[8].y, visible: true, frozen: Boolean(gates?.indexFolded)},
       thumb: {x: points[4].x, y: points[4].y, visible: Boolean(gates?.thumbExtended), active: Boolean(gates?.canPressLeft)},
-      middle: {x: points[12].x, y: points[12].y, visible: (index && middle && !ring), active: Boolean(gates?.isScrollGesture)},
+      middle: {x: points[12].x, y: points[12].y, visible: Boolean(vSignPosture), active: Boolean(gates?.isScrollGesture)},
       ring: {x: points[16].x, y: points[16].y, visible: false, active: false},
       pinky: {x: points[20].x, y: points[20].y, visible: Boolean(gates?.pinkyExtended), active: Boolean(gates?.canPressRight)},
       wrist: {x: points[0].x, y: points[0].y, visible: true},
@@ -750,28 +772,18 @@ export class AirMouseController {
       observed.activePos.y = clamp(Number(filtV.toFixed(4)), 0, 1);
 
       if (this.mode === 'scroll') {
-        // === RATE-BASED AUTO-SCROLL ANCHOR (휠클릭 자동 스크롤 모드) ===
-        if (this.scrollAnchorY === null) {
-          this.scrollAnchorY = observed.anchor.y;
-          this.scrollAnchorX = observed.anchor.x;
-          this.remaining.y = 0;
+        if (this.lastTouchY === null) {
+          this.lastTouchY = observed.anchor.y;
         }
-        const anchorY = this.scrollAnchorY;
-        const offsetY = observed.anchor.y - anchorY;
-        const DEADZONE = 0.012; // ±12px deadzone around center anchor
-        let velocity = 0;
-        if (Math.abs(offsetY) > DEADZONE) {
-          const delta = offsetY > 0 ? (offsetY - DEADZONE) : (offsetY + DEADZONE);
-          velocity = delta * this.sensitivity * 0.45;
-        }
-        this.scrollVelocity = velocity;
-
-        if (Math.abs(velocity) > 0.01) {
-          this.remaining.y += velocity;
-          const wheel = clamp(Math.trunc(this.remaining.y / 4) * 4, -120, 120);
+        const motionY = observed.anchor.y - this.lastTouchY;
+        this.lastTouchY = observed.anchor.y;
+        if (Math.abs(motionY) > 0.0008) {
+          const scrollInput = -motionY * this.sensitivity * 1.6;
+          this.remaining.y += scrollInput;
+          const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
           if (wheel) {
             events.push({type: 'scroll', dy: wheel});
-            this.remaining.y = clamp(this.remaining.y - wheel, -3.999, 3.999);
+            this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
           }
         }
       } else {
