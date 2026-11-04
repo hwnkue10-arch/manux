@@ -17,8 +17,8 @@ export class MouseWorkspace {
             return {
               x: clamp(parsed.x, 0, 0.75),
               y: clamp(parsed.y, 0, 0.75),
-              width: clamp(parsed.width, 0.2, 0.95),
-              height: clamp(parsed.height, 0.2, 0.95),
+              width: clamp(parsed.width, 0.20, 0.95),
+              height: clamp(parsed.height, 0.20, 0.95),
             };
           }
         }
@@ -29,6 +29,7 @@ export class MouseWorkspace {
     this.activeZone = loadActiveZone();
     this.paused = false;
 
+    // Pure unchanged AirMouseController instantiation
     const createController = () => {
       const sensitivity = Number(this.$('#mouse-sensitivity')?.value ?? 1800);
       const pointerMode = this.$('#mouse-pointer-mode')?.value ?? 'trigger';
@@ -44,7 +45,6 @@ export class MouseWorkspace {
         vScroll: true,
         rotationDeg: crossView ? -22 : 0,
         gainY: crossView ? 2.2 : 1.0,
-        activeZone: this.activeZone,
       });
     };
 
@@ -58,9 +58,6 @@ export class MouseWorkspace {
     this.pending = false;
     this.lastFrame = null;
     this.position = {x: 130, y: 110};
-    this.pressed = false;
-    this.drag = null;
-    this.clickStart = null;
 
     this.overlayCanvas = this.$('#overlay-hud-canvas');
     this.overlayCtx = this.overlayCanvas?.getContext('2d');
@@ -132,6 +129,9 @@ export class MouseWorkspace {
     this.$('#zone-width')?.addEventListener('input', onZoneSliderInput);
     this.$('#zone-height')?.addEventListener('input', onZoneSliderInput);
 
+    // Direct Interactive Drag & Resize on the Camera Preview Active Zone Box
+    this.initInteractiveZone();
+
     // Overlay triggers
     this.$('#btn-enter-overlay')?.addEventListener('click', () => void this.toggleOverlay(true));
     this.$('#btn-quick-overlay')?.addEventListener('click', () => void this.toggleOverlay(!this.overlayActive));
@@ -194,6 +194,83 @@ export class MouseWorkspace {
     this.refresh();
   }
 
+  initInteractiveZone() {
+    const zoneBox = this.$('#camera-active-zone');
+    const cameraWrap = this.$('.camera-wrap');
+    if (!zoneBox || !cameraWrap) return;
+
+    let dragMode = null; // 'move' | 'tl' | 'tr' | 'bl' | 'br'
+    let startX = 0, startY = 0;
+    let initZone = null;
+
+    zoneBox.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const handle = e.target.dataset?.handle;
+      dragMode = handle ? handle : 'move';
+      startX = e.clientX;
+      startY = e.clientY;
+      initZone = {...this.activeZone};
+      zoneBox.classList.add('dragging');
+      zoneBox.setPointerCapture(e.pointerId);
+    });
+
+    zoneBox.addEventListener('pointermove', e => {
+      if (!dragMode || !initZone) return;
+      const rect = cameraWrap.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      const dx = (e.clientX - startX) / rect.width;
+      const dy = (e.clientY - startY) / rect.height;
+
+      let nextX = initZone.x;
+      let nextY = initZone.y;
+      let nextW = initZone.width;
+      let nextH = initZone.height;
+
+      if (dragMode === 'move') {
+        nextX = clamp(initZone.x + dx, 0, 1 - initZone.width);
+        nextY = clamp(initZone.y + dy, 0, 1 - initZone.height);
+      } else if (dragMode === 'br') {
+        nextW = clamp(initZone.width + dx, 0.20, 1 - initZone.x);
+        nextH = clamp(initZone.height + dy, 0.20, 1 - initZone.y);
+      } else if (dragMode === 'bl') {
+        const right = initZone.x + initZone.width;
+        nextX = clamp(initZone.x + dx, 0, right - 0.20);
+        nextW = right - nextX;
+        nextH = clamp(initZone.height + dy, 0.20, 1 - initZone.y);
+      } else if (dragMode === 'tr') {
+        const bottom = initZone.y + initZone.height;
+        nextW = clamp(initZone.width + dx, 0.20, 1 - initZone.x);
+        nextY = clamp(initZone.y + dy, 0, bottom - 0.20);
+        nextH = bottom - nextY;
+      } else if (dragMode === 'tl') {
+        const right = initZone.x + initZone.width;
+        const bottom = initZone.y + initZone.height;
+        nextX = clamp(initZone.x + dx, 0, right - 0.20);
+        nextW = right - nextX;
+        nextY = clamp(initZone.y + dy, 0, bottom - 0.20);
+        nextH = bottom - nextY;
+      }
+
+      this.setActiveZone({ x: nextX, y: nextY, width: nextW, height: nextH });
+    });
+
+    const endDrag = e => {
+      if (dragMode) {
+        dragMode = null;
+        initZone = null;
+        zoneBox.classList.remove('dragging');
+        try {
+          zoneBox.releasePointerCapture(e.pointerId);
+        } catch {}
+      }
+    };
+
+    zoneBox.addEventListener('pointerup', endDrag);
+    zoneBox.addEventListener('pointercancel', endDrag);
+  }
+
   setActiveZone(zone) {
     this.activeZone = {
       x: clamp(Number(zone.x) || 0, 0, 0.75),
@@ -204,7 +281,6 @@ export class MouseWorkspace {
     try {
       localStorage.setItem('manux_active_zone', JSON.stringify(this.activeZone));
     } catch {}
-    this.controller?.setActiveZone(this.activeZone);
     this.syncActiveZoneUI();
   }
 
@@ -422,7 +498,32 @@ export class MouseWorkspace {
   update({landmarks, now, quality, handedness, width, height, latency = 0}) {
     if (!this.active && !this.overlayActive) return null;
     if (this.enabled && latency > 450) this.stop('추적 지연이 높아 제어를 껐습니다. 해상도를 낮추고 다시 켜보세요.');
+
+    // Pure 100% unchanged AirMouseController execution
     const state = this.controller.update({landmarks, now, quality, handedness, width, height, enabled: this.enabled});
+
+    // Remap coordinates from controller's default box (0.28, 0.20, 0.44, 0.48) to custom Active Zone
+    const zone = this.activeZone;
+    if (zone && state) {
+      if (Array.isArray(state.events)) {
+        for (const ev of state.events) {
+          if (ev.type === 'moveTo') {
+            const mirroredX = ev.x * 0.44 + 0.28;
+            const ptY = ev.y * 0.48 + 0.20;
+            ev.x = clamp((mirroredX - zone.x) / zone.width, 0, 1);
+            ev.y = clamp((ptY - zone.y) / zone.height, 0, 1);
+          }
+        }
+      }
+      if (state.activePos) {
+        const mirroredX = state.activePos.x * 0.44 + 0.28;
+        const ptY = state.activePos.y * 0.48 + 0.20;
+        state.activePos = {
+          x: clamp((mirroredX - zone.x) / zone.width, 0, 1),
+          y: clamp((ptY - zone.y) / zone.height, 0, 1),
+        };
+      }
+    }
 
     if (this.enabled) {
       this.lastFrame = performance.now();

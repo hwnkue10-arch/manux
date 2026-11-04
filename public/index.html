@@ -165,13 +165,13 @@
           <video id="camera" playsinline muted autoplay aria-label="웹캠 미리보기"></video>
           <canvas id="landmarks" aria-hidden="true"></canvas>
 
-          <!-- 16:9 Active Zone Bounding Box Overlay -->
-          <div id="camera-active-zone" class="camera-active-zone">
-            <span class="zone-badge">🖥️ 모니터 100% 매핑 영역</span>
-            <div class="zone-corner tl"></div>
-            <div class="zone-corner tr"></div>
-            <div class="zone-corner bl"></div>
-            <div class="zone-corner br"></div>
+          <!-- 16:9 Active Zone Bounding Box Overlay (Direct Interactive Drag & Resize) -->
+          <div id="camera-active-zone" class="camera-active-zone" title="드래그하여 위치 이동, 모서리를 끌어 크기 조절">
+            <span class="zone-badge">🖥️ 모니터 100% 매핑 영역 (드래그하여 조절)</span>
+            <div class="zone-corner tl" data-handle="tl" title="크기 조절"></div>
+            <div class="zone-corner tr" data-handle="tr" title="크기 조절"></div>
+            <div class="zone-corner bl" data-handle="bl" title="크기 조절"></div>
+            <div class="zone-corner br" data-handle="br" title="크기 조절"></div>
           </div>
 
           <div id="camera-empty">
@@ -250,5 +250,6 @@
   <span>MANUX Air Mouse · Contactless Human-Computer Interaction</span>
   <span>Local Neural Inference (MediaPipe Tasks Vision)</span>
 </footer>
+<script type="module" src="/src/app.js"></script>
 </body>
 </html>
