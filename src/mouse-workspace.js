@@ -1,13 +1,5 @@
 import {AirMouseController} from './air-mouse-controller.js';
 
-const LABELS = {
-  idle:'쉬는 중 (주먹/휴식)',
-  move:'👆 포인터 이동 (검지)',
-  left:'🤏 좌클릭 · 드래그 (엄지+중지)',
-  right:'👆 우클릭 (엄지+약지)',
-  scroll:'🖐️ 폰 터치 스크롤 (손바닥 펴기/V자)',
-  both:'🤏 좌우 동시 클릭 (엄지+중지+약지)'
-};
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 /** Practice actions are confined to the pad; only the desktop preload can control Windows. */
@@ -19,7 +11,7 @@ export class MouseWorkspace {
 
     const createController = () => {
       const sensitivity = Number(this.$('#mouse-sensitivity')?.value ?? 1800);
-      const pointerMode = this.$('#mouse-pointer-mode')?.value ?? 'index';
+      const pointerMode = this.$('#mouse-pointer-mode')?.value ?? 'trigger';
       const ballistics = this.$('#mouse-ballistics') ? this.$('#mouse-ballistics').checked : true;
       const clickLock = this.$('#mouse-click-lock') ? this.$('#mouse-click-lock').checked : true;
       const crossView = this.$('#mouse-cross-view') ? this.$('#mouse-cross-view').checked : true;
@@ -58,6 +50,19 @@ export class MouseWorkspace {
     this.$('#mouse-pointer-mode')?.addEventListener('change', () => {
       this.stop('추적 방식을 변경했습니다.');
       this.controller = createController();
+      this.updateGuideCards();
+      this.updateOverlayModeButton();
+    });
+
+    this.$('#overlay-mode-toggle')?.addEventListener('click', () => {
+      const modeSelect = this.$('#mouse-pointer-mode');
+      if (modeSelect) {
+        modeSelect.value = modeSelect.value === 'trigger' ? 'index' : 'trigger';
+        this.stop(modeSelect.value === 'trigger' ? '트리거 모드로 전환했습니다.' : '핀치 모드로 전환했습니다.');
+        this.controller = createController();
+        this.updateGuideCards();
+        this.updateOverlayModeButton();
+      }
     });
 
     const updateSettings = (msg) => {
@@ -132,9 +137,81 @@ export class MouseWorkspace {
       }
     }, 100);
 
+    this.updateGuideCards();
+    this.updateOverlayModeButton();
     this.renderTarget();
     this.renderCursor();
     this.refresh();
+  }
+
+  getModeLabel(mode) {
+    const pointerMode = this.controller?.pointerMode ?? 'trigger';
+    if (pointerMode === 'trigger') {
+      switch (mode) {
+        case 'idle': return '쉬는 중 (주먹/휴식)';
+        case 'move': return '👆 1: 포인터 이동 (검지)';
+        case 'frozen': return '🔒 커서 고정 (엄지 펴서 클릭)';
+        case 'left': return '🔫 좌클릭 · 드래그 (엄지 펴기)';
+        case 'right': return '🤙 우클릭 (소지 펴기)';
+        case 'both': return '🤙 좌우 동시 클릭 (엄지+소지)';
+        case 'scroll': return '✌️ 휠 스크롤 (V자 위아래)';
+        default: return '대기 중';
+      }
+    } else if (pointerMode === 'index') {
+      switch (mode) {
+        case 'idle': return '쉬는 중 (주먹/휴식)';
+        case 'move': return '👆 포인터 이동 (검지)';
+        case 'left': return '🤏 좌클릭 · 드래그 (엄지+중지)';
+        case 'right': return '👆 우클릭 (엄지+약지)';
+        case 'both': return '🤏 좌우 동시 클릭 (엄지+중지+약지)';
+        case 'scroll': return '✌️ 휠 스크롤 (V자 위아래)';
+        default: return '대기 중';
+      }
+    } else {
+      switch (mode) {
+        case 'idle': return '쉬는 중 (주먹/휴식)';
+        case 'move': return '✋ 손바닥 포인터 이동';
+        case 'left': return '🤏 엄지+검지 좌클릭';
+        case 'right': return '👆 엄지+중지 우클릭';
+        case 'scroll': return '🖐️ 휠 스크롤';
+        default: return '대기 중';
+      }
+    }
+  }
+
+  updateOverlayModeButton() {
+    const btn = this.$('#overlay-mode-toggle');
+    if (btn) {
+      const mode = this.controller?.pointerMode ?? 'trigger';
+      btn.textContent = mode === 'trigger' ? '🔄 모드: 트리거' : (mode === 'index' ? '🔄 모드: 핀치' : '🔄 모드: 손바닥');
+    }
+  }
+
+  updateGuideCards() {
+    const mode = this.controller?.pointerMode ?? 'trigger';
+    const articles = this.root.querySelectorAll('.mouse-guide article');
+    if (articles.length >= 4) {
+      const a1 = articles[0]?.querySelector('div');
+      const a2 = articles[1]?.querySelector('div');
+      const a3 = articles[2]?.querySelector('div');
+      const a4 = articles[3]?.querySelector('div');
+      if (mode === 'trigger') {
+        if (a1) a1.innerHTML = '<h3>👆 1: 포인터 이동 (검지)</h3><p>검지 끝(LM 8) 직접 추적<br>검지를 접으면 그 자리에 커서 고정(Freeze)</p>';
+        if (a2) a2.innerHTML = '<h3>🔫 엄지 펴기: 좌클릭 & 드래그</h3><p>엄지만 펴면 즉시 좌클릭 & 유지 시 드래그<br>검지를 접고 엄지를 펴면 흔들림 0% 정밀 클릭</p>';
+        if (a3) a3.innerHTML = '<h3>🤙 소지 펴기: 우클릭</h3><p>새끼손가락(소지)만 펴면 우클릭<br>엄지와 소지를 같이 펴면 좌우 동시 클릭</p>';
+        if (a4) a4.innerHTML = '<h3>✌️ V 제스처: 휠 스크롤</h3><p>검지+중지 펴고 위아래 이동 시 스크롤<br>주먹 쥐면(✊) 완전한 쉬는 자세</p>';
+      } else if (mode === 'index') {
+        if (a1) a1.innerHTML = '<h3>👆 검지 포인터 이동</h3><p>검지 끝(LM 8) 직접 추적<br>주먹 외 모든 자세 추적 · 떨림 방지</p>';
+        if (a2) a2.innerHTML = '<h3>🤏 엄지+중지: 좌클릭 & 드래그</h3><p>엄지+중지 맞닿으면 좌클릭 & 더블클릭<br>검지 흔들림 0% · 연속 드래그</p>';
+        if (a3) a3.innerHTML = '<h3>👆 엄지+약지: 우클릭</h3><p>엄지+약지 맞닿으면 우클릭<br>좌우 독립 판정 및 동시 클릭 가능</p>';
+        if (a4) a4.innerHTML = '<h3>✌️ 제스처 2: 폰 터치 스크롤</h3><p>V자 펴고 위로 그으면 아래 스크롤<br>주먹 쥐어 손 떼기 (역스크롤 0%)</p>';
+      } else {
+        if (a1) a1.innerHTML = '<h3>✋ 손바닥 포인터 이동</h3><p>손바닥 중심 코어 추적<br>손바닥을 편 채 이동</p>';
+        if (a2) a2.innerHTML = '<h3>🤏 엄지+검지: 좌클릭</h3><p>엄지+검지 맞닿으면 좌클릭<br>유지 시 드래그</p>';
+        if (a3) a3.innerHTML = '<h3>👆 엄지+중지: 우클릭</h3><p>엄지+중지 맞닿으면 우클릭</p>';
+        if (a4) a4.innerHTML = '<h3>🖐️ 폰 터치 스크롤</h3><p>손바닥 펴고 위아래 이동</p>';
+      }
+    }
   }
 
   get desktop() { return this.$('#mouse-target')?.value === 'desktop'; }
@@ -280,10 +357,10 @@ export class MouseWorkspace {
         holding:'손 모양을 확인하고 있습니다.',
         'tracking-reset':'손 위치를 다시 잡았습니다. 천천히 움직여주세요.',
       };
-      this.status(hints[state.phase] || (state.mode === 'idle' ? '쉬는 중입니다 (주먹/휴식).' : (state.mode === 'scroll' ? '✌️ 폰 터치 스크롤 중 · 손을 위아래로 그으세요.' : `${LABELS[state.mode] || state.mode} 중`)));
+      this.status(hints[state.phase] || (state.mode === 'idle' ? '쉬는 중입니다 (주먹/휴식).' : (state.mode === 'scroll' ? '✌️ 휠 스크롤 중 · 손을 위아래로 그으세요.' : (state.mode === 'frozen' ? '🔒 커서 고정됨 · 엄지를 펴서 클릭하세요.' : `${this.getModeLabel(state.mode)} 중`))));
     }
 
-    const labelText = this.enabled ? (LABELS[state.mode] || state.mode) : '대기 중';
+    const labelText = this.enabled ? this.getModeLabel(state.mode) : '대기 중';
     const modeEl = this.$('#mouse-mode'); if (modeEl) modeEl.textContent = labelText;
     const badgeEl = this.$('#overlay-mode-badge'); if (badgeEl) badgeEl.textContent = labelText;
 
@@ -333,155 +410,266 @@ export class MouseWorkspace {
     const rng = (state.fingertips?.ring && state.fingertips.ring.visible !== false) ? mapPoint(state.fingertips.ring) : null;
     const pnk = (state.fingertips?.pinky && state.fingertips.pinky.visible !== false) ? mapPoint(state.fingertips.pinky) : null;
 
-    // Connecting laser line between Thumb (4) and Middle (12) during left click / drag
-    if ((state.mode === 'left' || state.mode === 'both') && thm && mid) {
-      ctx.save();
-      ctx.strokeStyle = '#10b981';
-      ctx.lineWidth = 4;
-      ctx.shadowColor = '#10b981';
-      ctx.shadowBlur = 14;
-      ctx.beginPath();
-      ctx.moveTo(thm.x, thm.y);
-      ctx.lineTo(mid.x, mid.y);
-      ctx.stroke();
+    const isTrigger = (this.controller?.pointerMode ?? 'trigger') === 'trigger';
 
-      ctx.fillStyle = '#10b981';
-      ctx.font = 'bold 12px "Segoe UI", sans-serif';
-      ctx.fillText('🤏 좌클릭 · 드래그', (thm.x + mid.x) / 2 + 15, (thm.y + mid.y) / 2);
-      ctx.restore();
-    }
+    if (isTrigger) {
+      // === PARADIGM B: INDEPENDENT TRIGGER HUD ===
+      // 1. Index Reticle (LM 8): Active pointer or locked target
+      if (idx) {
+        ctx.save();
+        const isFrozen = state.mode === 'frozen' || Boolean(state.fingertips?.index?.frozen);
+        const isClicking = state.mode === 'left' || state.mode === 'both';
+        ctx.fillStyle = isFrozen ? '#38bdf8' : (isClicking ? '#22c55e' : '#00f0ff');
+        ctx.shadowColor = ctx.fillStyle;
+        ctx.shadowBlur = 18;
 
-    // Connecting laser line between Thumb (4) and Ring (16) during right click
-    if ((state.mode === 'right' || state.mode === 'both') && thm && rng) {
-      ctx.save();
-      ctx.strokeStyle = '#3b82f6';
-      ctx.lineWidth = 4;
-      ctx.shadowColor = '#3b82f6';
-      ctx.shadowBlur = 14;
-      ctx.beginPath();
-      ctx.moveTo(thm.x, thm.y);
-      ctx.lineTo(rng.x, rng.y);
-      ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(idx.x, idx.y, 6, 0, Math.PI * 2);
+        ctx.fill();
 
-      ctx.fillStyle = '#3b82f6';
-      ctx.font = 'bold 12px "Segoe UI", sans-serif';
-      ctx.fillText('👆 우클릭', (thm.x + rng.x) / 2 + 15, (thm.y + rng.y) / 2);
-      ctx.restore();
-    }
+        ctx.strokeStyle = ctx.fillStyle;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(idx.x, idx.y, 18, 0, Math.PI * 2);
+        ctx.stroke();
 
-    // Stream guides during Smartphone Touch Scroll (Open Palm or V-Sign)
-    if (state.mode === 'scroll') {
-      ctx.save();
-      ctx.strokeStyle = '#c084fc';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([4, 4]);
-      ctx.shadowColor = '#c084fc';
-      ctx.shadowBlur = 14;
-      ctx.beginPath();
-      if (idx && mid && rng) {
+        // Crosshair ticks
+        const r1 = 12, r2 = 24;
+        ctx.beginPath();
+        ctx.moveTo(idx.x - r2, idx.y); ctx.lineTo(idx.x - r1, idx.y);
+        ctx.moveTo(idx.x + r1, idx.y); ctx.lineTo(idx.x + r2, idx.y);
+        ctx.moveTo(idx.x, idx.y - r2); ctx.lineTo(idx.x, idx.y - r1);
+        ctx.moveTo(idx.x, idx.y + r1); ctx.lineTo(idx.x, idx.y + r2);
+        ctx.stroke();
+
+        ctx.font = 'bold 12px "Segoe UI", sans-serif';
+        if (isFrozen) {
+          ctx.fillText('🔒 고정됨 [LM8 LOCKED]', idx.x + 24, idx.y - 12);
+        } else if (isClicking) {
+          ctx.fillText('🎯 타겟 클릭 중', idx.x + 24, idx.y - 12);
+        } else {
+          ctx.fillText('INDEX [LM8]', idx.x + 24, idx.y - 12);
+        }
+        ctx.restore();
+      }
+
+      // 2. Thumb Trigger Beacon (LM 4 - Left Click / Drag)
+      if (thm && state.fingertips?.thumb?.visible !== false) {
+        ctx.save();
+        const isLeft = state.mode === 'left' || state.mode === 'both' || Boolean(state.fingertips?.thumb?.active);
+        ctx.fillStyle = '#f59e0b';
+        ctx.shadowColor = '#f59e0b';
+        ctx.shadowBlur = isLeft ? 22 : 12;
+        ctx.beginPath();
+        ctx.arc(thm.x, thm.y, isLeft ? 9 : 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#fef3c7';
+        ctx.lineWidth = isLeft ? 3 : 2;
+        ctx.beginPath();
+        ctx.arc(thm.x, thm.y, isLeft ? 20 : 13, 0, Math.PI * 2);
+        ctx.stroke();
+
+        if (isLeft) {
+          ctx.font = 'bold 13px "Segoe UI", sans-serif';
+          ctx.fillText('🔫 좌클릭 [LM4]', thm.x + 22, thm.y);
+        }
+        ctx.restore();
+      }
+
+      // 3. Pinky Trigger Beacon (LM 20 - Right Click)
+      if (pnk && state.fingertips?.pinky?.visible !== false) {
+        ctx.save();
+        const isRight = state.mode === 'right' || state.mode === 'both' || Boolean(state.fingertips?.pinky?.active);
+        ctx.fillStyle = '#6366f1';
+        ctx.shadowColor = '#6366f1';
+        ctx.shadowBlur = isRight ? 22 : 12;
+        ctx.beginPath();
+        ctx.arc(pnk.x, pnk.y, isRight ? 9 : 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#e0e7ff';
+        ctx.lineWidth = isRight ? 3 : 2;
+        ctx.beginPath();
+        ctx.arc(pnk.x, pnk.y, isRight ? 20 : 13, 0, Math.PI * 2);
+        ctx.stroke();
+
+        if (isRight) {
+          ctx.font = 'bold 13px "Segoe UI", sans-serif';
+          ctx.fillText('🤙 우클릭 [LM20]', pnk.x + 22, pnk.y);
+        }
+        ctx.restore();
+      }
+
+      // 4. Middle & Scroll Beam (✌️ V-sign)
+      if (state.mode === 'scroll' && idx && mid) {
+        ctx.save();
+        ctx.strokeStyle = '#c084fc';
+        ctx.lineWidth = 4;
+        ctx.setLineDash([4, 4]);
+        ctx.shadowColor = '#c084fc';
+        ctx.shadowBlur = 16;
+        ctx.beginPath();
         ctx.moveTo(idx.x, idx.y);
         ctx.lineTo(mid.x, mid.y);
+        ctx.stroke();
+
+        ctx.fillStyle = '#c084fc';
+        ctx.font = 'bold 13px "Segoe UI", sans-serif';
+        ctx.fillText('✌️ 휠 스크롤 (V자)', (idx.x + mid.x) / 2 + 15, (idx.y + mid.y) / 2 - 10);
+        ctx.restore();
+      }
+    } else {
+      // Connecting laser line between Thumb (4) and Middle (12) during left click / drag
+      if ((state.mode === 'left' || state.mode === 'both') && thm && mid) {
+        ctx.save();
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 4;
+        ctx.shadowColor = '#10b981';
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.moveTo(thm.x, thm.y);
+        ctx.lineTo(mid.x, mid.y);
+        ctx.stroke();
+
+        ctx.fillStyle = '#10b981';
+        ctx.font = 'bold 12px "Segoe UI", sans-serif';
+        ctx.fillText('🤏 좌클릭 · 드래그', (thm.x + mid.x) / 2 + 15, (thm.y + mid.y) / 2);
+        ctx.restore();
+      }
+
+      // Connecting laser line between Thumb (4) and Ring (16) during right click
+      if ((state.mode === 'right' || state.mode === 'both') && thm && rng) {
+        ctx.save();
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 4;
+        ctx.shadowColor = '#3b82f6';
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.moveTo(thm.x, thm.y);
         ctx.lineTo(rng.x, rng.y);
         ctx.stroke();
 
-        ctx.fillStyle = '#c084fc';
+        ctx.fillStyle = '#3b82f6';
         ctx.font = 'bold 12px "Segoe UI", sans-serif';
-        ctx.fillText('🖐️ 손바닥 폰 터치 스크롤', mid.x + 15, mid.y);
-      } else if (idx && mid) {
-        ctx.moveTo(idx.x, idx.y);
-        ctx.lineTo(mid.x, mid.y);
+        ctx.fillText('👆 우클릭', (thm.x + rng.x) / 2 + 15, (thm.y + rng.y) / 2);
+        ctx.restore();
+      }
+
+      // Stream guides during Smartphone Touch Scroll (Open Palm or V-Sign)
+      if (state.mode === 'scroll') {
+        ctx.save();
+        ctx.strokeStyle = '#c084fc';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([4, 4]);
+        ctx.shadowColor = '#c084fc';
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        if (idx && mid && rng) {
+          ctx.moveTo(idx.x, idx.y);
+          ctx.lineTo(mid.x, mid.y);
+          ctx.lineTo(rng.x, rng.y);
+          ctx.stroke();
+
+          ctx.fillStyle = '#c084fc';
+          ctx.font = 'bold 12px "Segoe UI", sans-serif';
+          ctx.fillText('🖐️ 손바닥 폰 터치 스크롤', mid.x + 15, mid.y);
+        } else if (idx && mid) {
+          ctx.moveTo(idx.x, idx.y);
+          ctx.lineTo(mid.x, mid.y);
+          ctx.stroke();
+
+          ctx.fillStyle = '#c084fc';
+          ctx.font = 'bold 12px "Segoe UI", sans-serif';
+          ctx.fillText('✌️ 폰 터치 스크롤', (idx.x + mid.x) / 2 + 15, (idx.y + mid.y) / 2 - 10);
+        }
+        ctx.restore();
+      }
+
+      // Thumb Point (Amber Glow - only shown when middle/ring is active or clicking)
+      if (thm && (mid || rng || state.mode === 'left' || state.mode === 'right')) {
+        ctx.save();
+        ctx.fillStyle = '#f59e0b';
+        ctx.shadowColor = '#f59e0b';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(thm.x, thm.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#fef3c7';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(thm.x, thm.y, 12, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Middle Point (Emerald Glow - Left Click)
+      if (mid) {
+        ctx.save();
+        ctx.fillStyle = '#10b981';
+        ctx.shadowColor = '#10b981';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(mid.x, mid.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#d1fae5';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(mid.x, mid.y, 12, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Ring Point (Sapphire Blue Glow - Right Click)
+      if (rng) {
+        ctx.save();
+        ctx.fillStyle = '#3b82f6';
+        ctx.shadowColor = '#3b82f6';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(rng.x, rng.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#dbeafe';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(rng.x, rng.y, 12, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Index Point (Cyan Glowing Reticle - Active Pointer Cursor)
+      if (idx) {
+        ctx.save();
+        const isPointerActive = state.mode === 'move' || state.mode === 'left';
+        ctx.fillStyle = isPointerActive ? '#00f0ff' : '#64748b';
+        ctx.shadowColor = isPointerActive ? '#00f0ff' : '#00000000';
+        ctx.shadowBlur = isPointerActive ? 18 : 0;
+        ctx.beginPath();
+        ctx.arc(idx.x, idx.y, 7, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = isPointerActive ? '#22d3ee' : '#94a3b8';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(idx.x, idx.y, 18, 0, Math.PI * 2);
         ctx.stroke();
 
-        ctx.fillStyle = '#c084fc';
-        ctx.font = 'bold 12px "Segoe UI", sans-serif';
-        ctx.fillText('✌️ 폰 터치 스크롤', (idx.x + mid.x) / 2 + 15, (idx.y + mid.y) / 2 - 10);
+        // Crosshair ticks
+        const r1 = 12, r2 = 24;
+        ctx.beginPath();
+        ctx.moveTo(idx.x - r2, idx.y); ctx.lineTo(idx.x - r1, idx.y);
+        ctx.moveTo(idx.x + r1, idx.y); ctx.lineTo(idx.x + r2, idx.y);
+        ctx.moveTo(idx.x, idx.y - r2); ctx.lineTo(idx.x, idx.y - r1);
+        ctx.moveTo(idx.x, idx.y + r1); ctx.lineTo(idx.x, idx.y + r2);
+        ctx.stroke();
+
+        if (isPointerActive) {
+          ctx.fillStyle = '#00f0ff';
+          ctx.font = '600 11px "Segoe UI", sans-serif';
+          ctx.fillText('INDEX [LM8]', idx.x + 22, idx.y - 12);
+        }
+        ctx.restore();
       }
-      ctx.restore();
-    }
-
-    // Thumb Point (Amber Glow - only shown when middle/ring is active or clicking)
-    if (thm && (mid || rng || state.mode === 'left' || state.mode === 'right')) {
-      ctx.save();
-      ctx.fillStyle = '#f59e0b';
-      ctx.shadowColor = '#f59e0b';
-      ctx.shadowBlur = 12;
-      ctx.beginPath();
-      ctx.arc(thm.x, thm.y, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#fef3c7';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(thm.x, thm.y, 12, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // Middle Point (Emerald Glow - Left Click)
-    if (mid) {
-      ctx.save();
-      ctx.fillStyle = '#10b981';
-      ctx.shadowColor = '#10b981';
-      ctx.shadowBlur = 12;
-      ctx.beginPath();
-      ctx.arc(mid.x, mid.y, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#d1fae5';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(mid.x, mid.y, 12, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // Ring Point (Sapphire Blue Glow - Right Click)
-    if (rng) {
-      ctx.save();
-      ctx.fillStyle = '#3b82f6';
-      ctx.shadowColor = '#3b82f6';
-      ctx.shadowBlur = 12;
-      ctx.beginPath();
-      ctx.arc(rng.x, rng.y, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#dbeafe';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(rng.x, rng.y, 12, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // Index Point (Cyan Glowing Reticle - Active Pointer Cursor)
-    if (idx) {
-      ctx.save();
-      const isPointerActive = state.mode === 'move' || state.mode === 'left';
-      ctx.fillStyle = isPointerActive ? '#00f0ff' : '#64748b';
-      ctx.shadowColor = isPointerActive ? '#00f0ff' : '#00000000';
-      ctx.shadowBlur = isPointerActive ? 18 : 0;
-      ctx.beginPath();
-      ctx.arc(idx.x, idx.y, 7, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = isPointerActive ? '#22d3ee' : '#94a3b8';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(idx.x, idx.y, 18, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Crosshair ticks
-      const r1 = 12, r2 = 24;
-      ctx.beginPath();
-      ctx.moveTo(idx.x - r2, idx.y); ctx.lineTo(idx.x - r1, idx.y);
-      ctx.moveTo(idx.x + r1, idx.y); ctx.lineTo(idx.x + r2, idx.y);
-      ctx.moveTo(idx.x, idx.y - r2); ctx.lineTo(idx.x, idx.y - r1);
-      ctx.moveTo(idx.x, idx.y + r1); ctx.lineTo(idx.x, idx.y + r2);
-      ctx.stroke();
-
-      if (isPointerActive) {
-        ctx.fillStyle = '#00f0ff';
-        ctx.font = '600 11px "Segoe UI", sans-serif';
-        ctx.fillText('INDEX [LM8]', idx.x + 22, idx.y - 12);
-      }
-      ctx.restore();
     }
   }
 

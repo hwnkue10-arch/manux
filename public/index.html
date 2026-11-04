@@ -25,6 +25,7 @@
 <div id="overlay-hud-pill">
   <span class="brand-dot" style="color:#46e5bd">✦</span>
   <span id="overlay-mode-badge" class="hud-badge">👆 1: 포인터 이동</span>
+  <button id="overlay-mode-toggle" type="button" class="hud-btn" title="트리거 / 핀치 제어 방식 전환">🔄 모드: 트리거</button>
   <button id="overlay-exit-btn" type="button" class="hud-btn">🖥️ 창 모드로 복귀 (Esc)</button>
   <button id="overlay-pip-btn" type="button" class="hud-btn">📷 캠 미리보기</button>
   <button id="overlay-stop-btn" type="button" class="hud-btn danger">⏹️ 제어 중지</button>
@@ -46,7 +47,7 @@
     <section id="mouse-panel" class="mouse-panel" role="tabpanel" aria-labelledby="mode-mouse">
       <div class="overlay-hero-banner" style="margin-bottom:14px; background:linear-gradient(135deg, #e6fcf5, #e0f2fe); border:1px solid #99f6e4; border-radius:12px; padding:16px; text-align:center;">
         <button id="btn-enter-overlay" type="button" class="primary" style="font-size:15px; font-weight:700; padding:12px 24px; border-radius:9px; background:#0f766e; border-color:#0f766e; color:#fff; cursor:pointer; box-shadow:0 4px 14px rgba(15,118,110,0.35);">✨ 모니터 투명 HUD 오버레이 시작 (아이 트래커 방식)</button>
-        <p class="small-note" style="margin:8px 0 0; color:#0f766e; font-weight:600">모니터 전체 화면에 검지(8)·엄지(4)·중지(12)·약지(16) 네온 AR 포인트가 직접 떠오르며 앱을 가리지 않고 투명 제어합니다.</p>
+        <p class="small-note" style="margin:8px 0 0; color:#0f766e; font-weight:600">모니터 전체 화면에 검지(8)·엄지(4)·소지(20)·중지(12) 네온 AR 포인트가 직접 떠오르며 앱을 가리지 않고 투명 제어합니다.</p>
       </div>
       <div class="section-heading"><h2 id="mouse-title">Windows 마우스 제어</h2><span id="mouse-mode" class="status-pill">대기 중</span></div>
       <div class="mouse-toolbar">
@@ -57,8 +58,9 @@
       <div class="mouse-control-row" style="margin-top:10px">
         <label for="mouse-pointer-mode" style="font-size:12px; font-weight:600; color:var(--muted)">추적 패러다임</label>
         <select id="mouse-pointer-mode">
-          <option value="index" selected>👆 신형: 검지 포인터 + 엄지·중지 좌클릭 + 엄지·약지 우클릭 + ✌️ 폰 스크롤</option>
-          <option value="palm">✋ 손바닥 코어 추적 (기존 방식)</option>
+          <option value="trigger" selected>🔫 신형 트리거 모드 (권장): 검지 포인터(접으면 고정) + 엄지 펴서 좌클릭/드래그 + 소지 펴서 우클릭 + ✌️ 휠</option>
+          <option value="index">🤏 핀치 모드: 검지 포인터 + 엄지·중지 좌클릭 + 엄지·약지 우클릭 + ✌️ 휠</option>
+          <option value="palm">✋ 손바닥 코어 추적 (기존 클래식 방식)</option>
         </select>
       </div>
       <p id="mouse-target-note" class="small-note">실제 Windows 커서를 제어합니다. Ctrl + Alt + M으로 어디서든 중지할 수 있습니다.</p>

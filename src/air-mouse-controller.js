@@ -73,7 +73,8 @@ class OneEuroFilter {
 function observation(landmarks, width, height, previousPinch, allowVScroll = false, pointerMode = 'index') {
   if (!Array.isArray(landmarks) || landmarks.length !== 21 || !Number.isFinite(width) ||
       !Number.isFinite(height) || width <= 0 || height <= 0) return null;
-  const inBounds = pointerMode === 'index'
+  const isIndexLike = pointerMode === 'index' || pointerMode === 'trigger';
+  const inBounds = isIndexLike
     ? landmarks.every(p => p && Number.isFinite(p.x) && Number.isFinite(p.y) &&
         p.x >= -0.25 && p.x <= 1.25 && p.y >= -0.25 && p.y <= 1.25 &&
         (p.z === undefined || (Number.isFinite(p.z) && Math.abs(p.z) <= 3)))
@@ -83,8 +84,8 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   if (!inBounds) return null;
   // MediaPipe's z uses approximately the same scale as x. All axes below use video-width units.
   const points = landmarks.map(p => ({
-    x: pointerMode === 'index' ? clamp(p.x, 0, 1) : p.x,
-    y: (pointerMode === 'index' ? clamp(p.y, 0, 1) : p.y) * height / width,
+    x: isIndexLike ? clamp(p.x, 0, 1) : p.x,
+    y: (isIndexLike ? clamp(p.y, 0, 1) : p.y) * height / width,
     z: p.z ?? 0
   }));
   const palm = Math.max(dist2D(points[0], points[9]), dist2D(points[5], points[17]));
@@ -102,10 +103,20 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
   // Clenched fingers count: fingers curled tightly into palm
   const clenchedCount = [8, 12, 16, 20].filter(tip => dist2D(points[tip], points[0]) < palm * 1.05).length;
-  // In index mode, index finger must be extended and aiming up away from wrist
+  // In index-like modes, index finger aiming up away from wrist
   const indexAiming = index && dist2D(points[8], points[0]) > palm * 1.10;
-  // In index mode, if index is curled or all fingers are clenched, it is strictly a fist / rest
-  const isFist = pointerMode === 'index'
+
+  const dThumbWrist = dist2D(points[4], points[0]) / palm;
+  const dThumbBase = dist2D(points[4], points[5]) / palm;
+  const thumbExtended = dThumbWrist > 0.80 && dThumbBase > 0.48;
+
+  const dPinkyWrist = dist2D(points[20], points[0]) / palm;
+  const pinkyStraight = straight(points[17], points[18], points[20]);
+  const pinkyExtended = pinkyStraight && dPinkyWrist > 0.98;
+
+  const isFist = pointerMode === 'trigger'
+    ? (clenchedCount >= 4 && !thumbExtended && !pinkyExtended)
+    : pointerMode === 'index'
     ? (!indexAiming || clenchedCount >= 4)
     : (clenchedCount >= 2);
 
@@ -132,7 +143,77 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   let anchor = null;
   let gates = null;
 
-  if (pointerMode === 'index') {
+  if (pointerMode === 'trigger') {
+    // === PARADIGM B: INDEPENDENT FINGER TRIGGER / EXTENSION MODE ===
+    // 1. Pointer: Index Tip (LM 8). When index curls/folds, pointer FREEZES at last valid location.
+    // 2. Left Click: Thumb (LM 4) extended outwards.
+    // 3. Right Click: Pinky (LM 20) extended outwards.
+    // 4. Simultaneous Click: Thumb + Pinky both extended.
+    // 5. Scroll: Index + Middle extended (✌️ V-sign), with Thumb and Pinky folded.
+    // 6. Rest: Complete 5-finger fist (all 4 fingers curled AND thumb not extended).
+
+    // V-sign scroll: Index + Middle extended, Ring & Pinky curled, Thumb NOT extended
+    const isVSignScroll = allowVScroll &&
+      index && middle && !ring && !pinky && !thumbExtended &&
+      dist2D(points[16], points[0]) < palm * 1.10 &&
+      dist2D(points[20], points[0]) < palm * 1.05 &&
+      dTwoFinger > 0.16;
+
+    const isScrollGesture = isVSignScroll;
+
+    const canPressLeft = !isFist && !isScrollGesture && thumbExtended;
+    const canPressRight = !isFist && !isScrollGesture && pinkyExtended;
+
+    if (isFist) {
+      mode = 'idle';
+      pinch = null;
+    } else if (isScrollGesture) {
+      mode = 'scroll';
+      pinch = null;
+    } else if (canPressLeft && canPressRight) {
+      mode = 'both';
+      pinch = 'both';
+    } else if (canPressLeft) {
+      mode = 'left';
+      pinch = 'left';
+    } else if (canPressRight) {
+      mode = 'right';
+      pinch = 'right';
+    } else if (!indexAiming) {
+      mode = 'frozen';
+      pinch = null;
+    } else {
+      mode = 'move';
+      pinch = null;
+    }
+
+    if (mode === 'scroll') {
+      anchor = {
+        x: (points[8].x + points[12].x) * 0.5,
+        y: (points[8].y + points[12].y) * 0.5,
+      };
+    } else {
+      anchor = {
+        x: points[8].x,
+        y: points[8].y,
+      };
+    }
+
+    gates = {
+      isFist,
+      isScrollGesture,
+      indexAiming,
+      indexFolded: !indexAiming,
+      canPressLeft,
+      canPressRight,
+      thumbExtended,
+      pinkyExtended,
+      pinkyStraight,
+      dThumbWrist,
+      dThumbBase,
+      dPinkyWrist,
+    };
+  } else if (pointerMode === 'index') {
     // === ERGONOMIC PARADIGM: Absolute 1:1 Mapping + Pure Gesture 2 Scroll + Independent Clicks ===
     // 1. Pointer: Cursor follows Index Tip (LM 8) in absolute coordinates (100% coincident with AR HUD).
     // 2. Strict Gesture 2 (V-Sign): Index + Middle extended upwards, Ring + Pinky curled into palm, clean V gap.
@@ -224,21 +305,43 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     y: clamp((points[8].y - 0.20) / 0.48, 0, 1),
   };
 
-  const middleActive = pointerMode === 'index' ? (dist2D(points[12], points[0]) > palm * 0.88) : true;
-  const ringActive = pointerMode === 'index' ? (dist2D(points[16], points[0]) > palm * 0.85) : true;
-  const pinkyActive = pointerMode === 'index' ? (dist2D(points[20], points[0]) > palm * 0.85) : true;
-  const thumbActive = pointerMode === 'index' ? (dist2D(points[4], points[0]) > palm * 0.60 && !isFist) : true;
+  let fingertips;
+  if (pointerMode === 'trigger') {
+    fingertips = {
+      index: {x: points[8].x, y: points[8].y, visible: true, frozen: Boolean(gates?.indexFolded)},
+      thumb: {x: points[4].x, y: points[4].y, visible: Boolean(gates?.thumbExtended), active: Boolean(gates?.canPressLeft)},
+      middle: {x: points[12].x, y: points[12].y, visible: (index && middle && !ring), active: Boolean(gates?.isScrollGesture)},
+      ring: {x: points[16].x, y: points[16].y, visible: false, active: false},
+      pinky: {x: points[20].x, y: points[20].y, visible: Boolean(gates?.pinkyExtended), active: Boolean(gates?.canPressRight)},
+      wrist: {x: points[0].x, y: points[0].y, visible: true},
+    };
+  } else if (pointerMode === 'index') {
+    const isFist = gates?.isFist;
+    const middleActive = dist2D(points[12], points[0]) > palm * 0.88;
+    const ringActive = dist2D(points[16], points[0]) > palm * 0.85;
+    const pinkyActive = dist2D(points[20], points[0]) > palm * 0.85;
+    const thumbActive = dist2D(points[4], points[0]) > palm * 0.60 && !isFist;
 
-  const fingertips = {
-    index: {x: points[8].x, y: points[8].y, visible: (pointerMode !== 'index' || indexAiming)},
-    thumb: {x: points[4].x, y: points[4].y, visible: thumbActive},
-    middle: {x: points[12].x, y: points[12].y, visible: middleActive},
-    ring: {x: points[16].x, y: points[16].y, visible: ringActive},
-    pinky: {x: points[20].x, y: points[20].y, visible: pinkyActive},
-    wrist: {x: points[0].x, y: points[0].y, visible: true},
-  };
+    fingertips = {
+      index: {x: points[8].x, y: points[8].y, visible: indexAiming},
+      thumb: {x: points[4].x, y: points[4].y, visible: thumbActive},
+      middle: {x: points[12].x, y: points[12].y, visible: middleActive},
+      ring: {x: points[16].x, y: points[16].y, visible: ringActive},
+      pinky: {x: points[20].x, y: points[20].y, visible: pinkyActive},
+      wrist: {x: points[0].x, y: points[0].y, visible: true},
+    };
+  } else {
+    fingertips = {
+      index: {x: points[8].x, y: points[8].y, visible: true},
+      thumb: {x: points[4].x, y: points[4].y, visible: true},
+      middle: {x: points[12].x, y: points[12].y, visible: true},
+      ring: {x: points[16].x, y: points[16].y, visible: true},
+      pinky: {x: points[20].x, y: points[20].y, visible: true},
+      wrist: {x: points[0].x, y: points[0].y, visible: true},
+    };
+  }
 
-  const unpinched = pointerMode === 'index'
+  const unpinched = (pointerMode === 'index' || pointerMode === 'trigger')
     ? (pinch === null)
     : (dIndex >= 0.44 && dMiddle >= 0.44);
 
@@ -275,6 +378,9 @@ export class AirMouseController {
     this.lastEmittedU = null;
     this.lastEmittedV = null;
     this.lockPos = null;
+    this.frozenU = null;
+    this.frozenV = null;
+    this.fistFrames = 0;
     this.reset();
   }
 
@@ -332,6 +438,9 @@ export class AirMouseController {
     this.lastEmittedU = null;
     this.lastEmittedV = null;
     this.lockPos = null;
+    this.frozenU = null;
+    this.frozenV = null;
+    this.fistFrames = 0;
     return this.state('disabled', [{type:'release'}]);
   }
 
@@ -372,6 +481,9 @@ export class AirMouseController {
     this.lastEmittedU = null;
     this.lastEmittedV = null;
     this.lockPos = null;
+    this.frozenU = null;
+    this.frozenV = null;
+    this.fistFrames = 0;
     if (disarm) this.armed = false;
     return this.state(phase, events);
   }
@@ -389,10 +501,11 @@ export class AirMouseController {
     if (this.lastTime !== null && now <= this.lastTime) return this.state('stale');
     const gap = this.lastTime !== null && now - this.lastTime > MAX_GAP_MS;
     this.lastTime = now;
+    const isIndexLike = this.pointerMode === 'index' || this.pointerMode === 'trigger';
     const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll, this.pointerMode) : null;
     if (!observed) {
-      // Index mode: a few dropped/poor frames must not break an ongoing drag.
-      if (this.pointerMode === 'index' && (this.leftDown || this.rightDown) &&
+      // Index/Trigger mode: a few dropped/poor frames must not break an ongoing drag.
+      if (isIndexLike && (this.leftDown || this.rightDown) &&
           this.lastValidAt !== null && now - this.lastValidAt < 300) {
         return this.state('holding');
       }
@@ -401,26 +514,26 @@ export class AirMouseController {
       return this.interrupt('invalid');
     }
     this.lastValidAt = now;
-    if (this.pointerMode === 'index' && observed.fingertips) {
+    if (isIndexLike && observed.fingertips) {
       const thm = observed.fingertips.thumb;
       const mid = observed.fingertips.middle;
       const rng = observed.fingertips.ring;
       const pnk = observed.fingertips.pinky;
       const idx = observed.fingertips.index;
       this.lastFingertips = {
-        index: idx ? {x: idx.x, y: idx.y, visible: idx.visible} : null,
-        thumb: thm ? {x: this.euroThumbX.filter(thm.x, now), y: this.euroThumbY.filter(thm.y, now), visible: thm.visible} : null,
-        middle: mid ? {x: this.euroMiddleX.filter(mid.x, now), y: this.euroMiddleY.filter(mid.y, now), visible: mid.visible} : null,
-        ring: rng ? {x: this.euroRingX.filter(rng.x, now), y: this.euroRingY.filter(rng.y, now), visible: rng.visible} : null,
-        pinky: pnk ? {x: this.euroPinkyX.filter(pnk.x, now), y: this.euroPinkyY.filter(pnk.y, now), visible: pnk.visible} : null,
+        index: idx ? {x: idx.x, y: idx.y, visible: idx.visible, frozen: Boolean(idx.frozen)} : null,
+        thumb: thm ? {x: this.euroThumbX.filter(thm.x, now), y: this.euroThumbY.filter(thm.y, now), visible: thm.visible, active: Boolean(thm.active)} : null,
+        middle: mid ? {x: this.euroMiddleX.filter(mid.x, now), y: this.euroMiddleY.filter(mid.y, now), visible: mid.visible, active: Boolean(mid.active)} : null,
+        ring: rng ? {x: this.euroRingX.filter(rng.x, now), y: this.euroRingY.filter(rng.y, now), visible: rng.visible, active: Boolean(rng.active)} : null,
+        pinky: pnk ? {x: this.euroPinkyX.filter(pnk.x, now), y: this.euroPinkyY.filter(pnk.y, now), visible: pnk.visible, active: Boolean(pnk.active)} : null,
         wrist: observed.fingertips.wrist,
       };
     } else {
       this.lastFingertips = observed.fingertips;
     }
     this.lastActivePos = observed.activePos;
-    // Index mode uses absolute mapping, so MediaPipe handedness flicker must not reset a drag.
-    const changedHand = this.pointerMode !== 'index' && handedness && this.lastHand && handedness !== this.lastHand;
+    // Index/Trigger mode uses absolute mapping, so MediaPipe handedness flicker must not reset a drag.
+    const changedHand = !isIndexLike && handedness && this.lastHand && handedness !== this.lastHand;
     this.lastHand = handedness;
     if (gap || changedHand) return this.interrupt('tracking-reset');
 
@@ -432,7 +545,178 @@ export class AirMouseController {
 
     const events = [];
 
-    if (this.pointerMode === 'index') {
+    if (this.pointerMode === 'trigger') {
+      // === PARADIGM B: INDEPENDENT FINGER TRIGGER / EXTENSION MODE ===
+      // 1. Pointer: Index Tip (LM 8). When index curls/folds, pointer FREEZES at last valid location.
+      // 2. Left Click: Thumb (LM 4) extended outwards. Hold = Drag. Fold = Release.
+      // 3. Right Click: Pinky (LM 20) extended outwards. Hold = Right Down. Fold = Release.
+      // 4. Simultaneous Click: Thumb + Pinky both extended.
+      // 5. Scroll: Index + Middle extended (✌️ V-sign), with Thumb and Pinky folded.
+      // 6. Rest: Complete 5-finger fist (all 4 fingers curled AND thumb not extended).
+      const g = observed.gates;
+
+      // Scroll requires a stable V-sign for 3 frames and can never start while a button is held.
+      if (g.isScrollGesture && !this.leftDown && !this.rightDown) this.scrollFrames++;
+      else this.scrollFrames = 0;
+      const scrolling = this.scrollFrames >= 3;
+
+      // Left Click (Thumb trigger): instant press, 2-frame debounced release
+      if (this.leftDown) {
+        if (g.dThumbWrist < 0.70 || g.dThumbBase < 0.40) {
+          if (++this.leftReleaseCount >= 2) {
+            this.leftDown = false;
+            this.leftReleaseCount = 0;
+            events.push({type: 'button', button: 'left', down: false});
+          }
+        } else this.leftReleaseCount = 0;
+      } else if (g.canPressLeft && !scrolling) {
+        this.leftDown = true;
+        this.leftReleaseCount = 0;
+        this.dragDisplacement = 0;
+        this.dragUnlocked = false;
+        this.lockPos = null;
+        events.push({type: 'button', button: 'left', down: true});
+      }
+
+      // Right Click (Pinky trigger): instant press, 2-frame debounced release
+      if (this.rightDown) {
+        if (g.dPinkyWrist < 0.88 || !g.pinkyStraight) {
+          if (++this.rightReleaseCount >= 2) {
+            this.rightDown = false;
+            this.rightReleaseCount = 0;
+            events.push({type: 'button', button: 'right', down: false});
+          }
+        } else this.rightReleaseCount = 0;
+      } else if (g.canPressRight && !scrolling) {
+        this.rightDown = true;
+        this.rightReleaseCount = 0;
+        events.push({type: 'button', button: 'right', down: true});
+      }
+
+      if (scrolling) {
+        this.mode = 'scroll';
+        this.fistFrames = 0;
+      } else if (this.leftDown && this.rightDown) {
+        this.mode = 'both';
+        this.fistFrames = 0;
+      } else if (this.leftDown) {
+        this.mode = 'left';
+        this.fistFrames = 0;
+      } else if (this.rightDown) {
+        this.mode = 'right';
+        this.fistFrames = 0;
+      } else if (g.indexFolded) {
+        if (g.isFist) {
+          if (this.mode === 'idle' || ++this.fistFrames >= 4) {
+            this.mode = 'idle';
+          } else {
+            this.mode = 'frozen';
+          }
+        } else {
+          this.mode = 'frozen';
+          this.fistFrames = 0;
+        }
+      } else {
+        this.mode = 'move';
+        this.fistFrames = 0;
+      }
+      this.pinch = this.mode === 'both' || this.mode === 'left' || this.mode === 'right' ? this.mode : null;
+
+      // While held, keep corresponding fingertip visible and active on HUD
+      if (this.lastFingertips) {
+        if (this.leftDown && this.lastFingertips.thumb) {
+          this.lastFingertips.thumb.visible = true;
+          this.lastFingertips.thumb.active = true;
+        }
+        if (this.rightDown && this.lastFingertips.pinky) {
+          this.lastFingertips.pinky.visible = true;
+          this.lastFingertips.pinky.active = true;
+        }
+      }
+
+      if (this.mode === 'idle') {
+        const result = this.interrupt('ready', false);
+        result.events.unshift(...events);
+        return result;
+      }
+
+      // Pointer coordinate calculation & freeze
+      let filtU, filtV;
+      if (g.indexFolded && this.frozenU !== null && this.frozenV !== null) {
+        // Index is folded: hold cursor at frozen position
+        filtU = this.frozenU;
+        filtV = this.frozenV;
+      } else {
+        const rawU = observed.activePos.x;
+        const rawV = observed.activePos.y;
+        filtU = this.euroU.filter(rawU, now);
+        filtV = this.euroV.filter(rawV, now);
+        this.frozenU = filtU;
+        this.frozenV = filtV;
+      }
+
+      // Click Freeze Lock: lock micro-displacement immediately following click until intentional drag
+      if (this.leftDown) {
+        if (!this.dragUnlocked) {
+          if (this.lockPos === null) {
+            this.lockPos = {u: filtU, v: filtV};
+          }
+          const dragDist = Math.hypot((filtU - this.lockPos.u) * 1920, (filtV - this.lockPos.v) * 1080);
+          if (dragDist < 16) {
+            filtU = this.lockPos.u;
+            filtV = this.lockPos.v;
+          } else {
+            this.dragUnlocked = true;
+          }
+        }
+      } else {
+        this.lockPos = null;
+      }
+
+      // Stationary Tremor Gate (Deadband)
+      if (this.lastEmittedU !== null && this.lastEmittedV !== null) {
+        const deltaPx = Math.hypot((filtU - this.lastEmittedU) * 1920, (filtV - this.lastEmittedV) * 1080);
+        if (deltaPx < 2.5 && !this.leftDown) {
+          filtU = this.lastEmittedU;
+          filtV = this.lastEmittedV;
+        }
+      }
+      this.lastEmittedU = filtU;
+      this.lastEmittedV = filtV;
+
+      observed.activePos.x = clamp(Number(filtU.toFixed(4)), 0, 1);
+      observed.activePos.y = clamp(Number(filtV.toFixed(4)), 0, 1);
+
+      if (this.mode === 'scroll') {
+        if (this.lastTouchY === null) {
+          this.lastTouchY = observed.anchor.y;
+        }
+        const motionY = observed.anchor.y - this.lastTouchY;
+        this.lastTouchY = observed.anchor.y;
+        if (Math.abs(motionY) > 0.0008) {
+          const scrollInput = -motionY * this.sensitivity * 1.6;
+          this.remaining.y += scrollInput;
+          const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
+          if (wheel) {
+            events.push({type: 'scroll', dy: wheel});
+            this.remaining.y = clamp(this.remaining.y - wheel, -5.999, 5.999);
+          }
+        }
+      } else {
+        this.lastTouchY = null;
+        events.push({type: 'moveTo', x: observed.activePos.x, y: observed.activePos.y});
+      }
+
+      return this.state('active', events, 1, {
+        fingertips: this.lastFingertips,
+        activePos: observed.activePos,
+        dIndex: observed.dIndex,
+        dMiddle: observed.dMiddle,
+        dRing: observed.dRing,
+        dPinky: observed.dPinky,
+        dTwoFinger: observed.dTwoFinger
+      });
+    } else if (this.pointerMode === 'index') {
       // === ERGONOMIC INDEX MODE: Absolute 1:1 Pointer + Debounced Sticky Buttons ===
       // Press: instant when the gate says the fingers touch (keeps native double-click fast).
       // Hold: once pressed, posture changes (index bending, fist detection, finger leaving HUD)

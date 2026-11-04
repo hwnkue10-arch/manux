@@ -546,3 +546,112 @@ test('pointerMode: index fist safety gate blocks clicks when curled, and stabili
   assert.ok(pointState.fingertips.middle && Number.isFinite(pointState.fingertips.middle.x));
   assert.ok(pointState.fingertips.ring && Number.isFinite(pointState.fingertips.ring.x));
 });
+
+test('pointerMode: trigger tracks index tip and folding index freezes cursor position', () => {
+  const s = session({pointerMode:'trigger', smoothing:1});
+  s.hold('trigger');
+
+  const p1 = s.feed('trigger', {x: 0.01});
+  assert.equal(p1.mode, 'move');
+  const freezeU = p1.activePos.x;
+  const freezeV = p1.activePos.y;
+
+  // Fold index finger (pose = trigger-freeze) -> mode becomes frozen
+  const pFrozen = s.feed('trigger-freeze', {x: 0.05, y: 0.05});
+  assert.equal(pFrozen.mode, 'frozen');
+  // activePos must be locked solid to the position before folding
+  assert.equal(pFrozen.activePos.x, freezeU);
+  assert.equal(pFrozen.activePos.y, freezeV);
+
+  // Unfolding index resumes move tracking
+  const pResume = s.feed('trigger');
+  assert.equal(pResume.mode, 'move');
+});
+
+test('pointerMode: trigger thumb extension triggers Left Click & drag, debounces release', () => {
+  const s = session({pointerMode:'trigger', smoothing:1});
+  s.hold('trigger');
+
+  // Extend thumb -> Left Down fires immediately
+  const pDown = s.feed('trigger-left');
+  assert.equal(pDown.mode, 'left');
+  assert.ok(pDown.events.some(e => e.type === 'button' && e.button === 'left' && e.down));
+
+  // Holding extended thumb while moving drags smoothly
+  const pDrag = s.feed('trigger-left', {x: 0.03});
+  assert.equal(pDrag.mode, 'left');
+  assert.equal(pDrag.events.filter(e => e.type === 'button').length, 0);
+
+  // Retracting thumb debounces release over 2 frames
+  const pRel1 = s.feed('trigger');
+  assert.equal(pRel1.events.filter(e => e.type === 'button').length, 0);
+  const pRel2 = s.feed('trigger');
+  assert.ok(pRel2.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
+});
+
+test('pointerMode: trigger fold-to-freeze then extend-thumb clicks at the frozen target', () => {
+  const s = session({pointerMode:'trigger', smoothing:1});
+  s.hold('trigger');
+
+  // Move pointer to target
+  const pTarget = s.feed('trigger', {x: 0.02});
+  const targetU = pTarget.activePos.x;
+  const targetV = pTarget.activePos.y;
+
+  // 1. Fold index to freeze
+  const pFreeze = s.feed('trigger-freeze');
+  assert.equal(pFreeze.mode, 'frozen');
+  assert.equal(pFreeze.activePos.x, targetU);
+
+  // 2. Extend thumb while index is folded -> Left Click fires AT target position!
+  const pClick = s.feed('trigger-freeze-click');
+  assert.equal(pClick.mode, 'left');
+  assert.ok(pClick.events.some(e => e.type === 'button' && e.button === 'left' && e.down));
+  assert.equal(pClick.activePos.x, targetU);
+
+  // 3. Retract thumb -> Left Click releases AT target position
+  s.feed('trigger-freeze');
+  const pUp = s.feed('trigger-freeze');
+  assert.ok(pUp.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
+  assert.equal(pUp.activePos.x, targetU);
+});
+
+test('pointerMode: trigger pinky extension triggers Right Click, both triggers simultaneous click', () => {
+  const s = session({pointerMode:'trigger', smoothing:1});
+  s.hold('trigger');
+
+  // Extend pinky -> Right Click
+  const pRight = s.feed('trigger-right');
+  assert.equal(pRight.mode, 'right');
+  assert.ok(pRight.events.some(e => e.type === 'button' && e.button === 'right' && e.down));
+
+  // Retract pinky -> Right Click released
+  s.feed('trigger');
+  const pRightUp = s.feed('trigger');
+  assert.ok(pRightUp.events.some(e => e.type === 'button' && e.button === 'right' && !e.down));
+
+  // Both Thumb and Pinky extended -> Left and Right both down
+  const pBoth = s.feed('trigger-both');
+  assert.equal(pBoth.mode, 'both');
+  assert.ok(pBoth.events.some(e => e.type === 'button' && e.button === 'left' && e.down));
+  assert.ok(pBoth.events.some(e => e.type === 'button' && e.button === 'right' && e.down));
+});
+
+test('pointerMode: trigger V-sign scrolls smoothly and full fist is idle', () => {
+  const s = session({pointerMode:'trigger', vScroll:true, smoothing:1});
+  s.hold('trigger');
+
+  // V-sign (Index + Middle extended, Thumb & Pinky folded) engages scroll after 3 dwell frames
+  s.feed('trigger-scroll');
+  s.feed('trigger-scroll');
+  s.feed('trigger-scroll');
+  const pScroll = s.feed('trigger-scroll', {y: -0.04});
+  assert.equal(pScroll.mode, 'scroll');
+  assert.ok(pScroll.events.some(e => e.type === 'scroll'));
+  assert.equal(pScroll.events.filter(e => e.type === 'button').length, 0);
+
+  // Fist (all 5 fingers curled) is strictly idle
+  const pFist = s.hold('fist').at(-1);
+  assert.equal(pFist.mode, 'idle');
+  assert.equal(pFist.events.filter(e => e.type === 'button' || e.type === 'scroll').length, 0);
+});
