@@ -826,3 +826,29 @@ test('pointerMode: trigger Open Palm (🖐) and V-Sign (✌️) scroll seamlessl
   const aimRecovered = s.feed('trigger');
   assert.equal(aimRecovered.mode, 'move', 'Returns cleanly to pointer move mode');
 });
+
+test('custom activeZone maps camera sub-rectangle to full 0..1 desktop screen range', () => {
+  // Custom active zone: top-center box (x: 0.15, y: 0.15, width: 0.60, height: 0.50)
+  // Reaches taskbar at Y = 0.65 without letting wrist leave bottom of camera frame!
+  const customZone = {x: 0.15, y: 0.15, width: 0.60, height: 0.50};
+  const s = session({pointerMode:'trigger', smoothing:1, activeZone:customZone});
+  s.hold('trigger');
+
+  // Top-left of zone: mirroredX = 0.15 -> points[8].x = 0.85, points[8].y = 0.15
+  const topLeftHand = hand('trigger');
+  topLeftHand[8] = {x: 0.85, y: 0.15, z: 0};
+  for (let i = 0; i < 4; i++) s.feed('trigger', {}, {landmarks: topLeftHand});
+  const pTopLeft = s.feed('trigger', {}, {landmarks: topLeftHand});
+  assert.equal(pTopLeft.mode, 'move');
+  assert.ok(pTopLeft.activePos.x <= 0.05, `Expected X near 0, got ${pTopLeft.activePos.x}`);
+  assert.ok(pTopLeft.activePos.y <= 0.05, `Expected Y near 0, got ${pTopLeft.activePos.y}`);
+
+  // Bottom-right of zone: mirroredX = 0.75 -> points[8].x = 0.25, points[8].y = 0.65
+  // Notice Y = 0.65 (hand comfortably inside webcam), but activePos.y reaches 1.0!
+  const bottomRightHand = hand('trigger');
+  bottomRightHand[8] = {x: 0.25, y: 0.65, z: 0};
+  for (let i = 0; i < 4; i++) s.feed('trigger', {}, {landmarks: bottomRightHand});
+  const pBottomRight = s.feed('trigger', {}, {landmarks: bottomRightHand});
+  assert.ok(pBottomRight.activePos.x >= 0.95, `Expected X near 1, got ${pBottomRight.activePos.x}`);
+  assert.ok(pBottomRight.activePos.y >= 0.95, `Expected Y near 1, got ${pBottomRight.activePos.y}`);
+});

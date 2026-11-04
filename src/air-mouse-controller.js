@@ -91,7 +91,7 @@ class OneEuroFilter {
   }
 }
 
-function observation(landmarks, width, height, previousPinch, allowVScroll = false, pointerMode = 'index') {
+function observation(landmarks, width, height, previousPinch, allowVScroll = false, pointerMode = 'index', activeZone = null) {
   if (!Array.isArray(landmarks) || landmarks.length !== 21 || !Number.isFinite(width) ||
       !Number.isFinite(height) || width <= 0 || height <= 0) return null;
   const isIndexLike = pointerMode === 'index' || pointerMode === 'trigger';
@@ -457,11 +457,16 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     };
   }
 
-  // Deadzone-free compact active zone mapping coordinates (0 ~ 1 normalized across comfortable desk view)
+  // Active zone mapping coordinates (0 ~ 1 normalized across calibrated active region)
+  const zoneX = activeZone?.x ?? 0.28;
+  const zoneY = activeZone?.y ?? 0.20;
+  const zoneW = activeZone?.width ?? 0.44;
+  const zoneH = activeZone?.height ?? 0.48;
+
   const mirroredX = 1.0 - (points[8].x);
   const activePos = {
-    x: clamp((mirroredX - 0.28) / 0.44, 0, 1),
-    y: clamp((points[8].y - 0.20) / 0.48, 0, 1),
+    x: clamp((mirroredX - zoneX) / zoneW, 0, 1),
+    y: clamp((points[8].y - zoneY) / zoneH, 0, 1),
   };
 
   let fingertips;
@@ -509,7 +514,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
 /** Pure landmark-to-input controller. It never sends OS events or stores camera data. */
 export class AirMouseController {
-  constructor({pointerMode = 'palm', sensitivity = 1800, smoothing = 0.45, holdMs = 160, ballistics = false, clickLock = false, vScroll = false, rotationDeg = 0, gainY = 1.0} = {}) {
+  constructor({pointerMode = 'palm', sensitivity = 1800, smoothing = 0.45, holdMs = 160, ballistics = false, clickLock = false, vScroll = false, rotationDeg = 0, gainY = 1.0, activeZone = null} = {}) {
     if (!Number.isFinite(sensitivity) || sensitivity < 100 || sensitivity > 6000 ||
         !Number.isFinite(smoothing) || smoothing <= 0 || smoothing > 1 ||
         !Number.isFinite(holdMs) || holdMs < 0 || holdMs > 2000) {
@@ -524,6 +529,7 @@ export class AirMouseController {
     this.vScroll = Boolean(vScroll);
     this.rotationDeg = Number.isFinite(rotationDeg) ? rotationDeg : 0;
     this.gainY = Number.isFinite(gainY) ? gainY : 1.0;
+    this.activeZone = activeZone;
     this.euroU = new OneEuroFilter({minCutoff: 0.25, beta: 9.0});
     this.euroV = new OneEuroFilter({minCutoff: 0.25, beta: 9.0});
     this.euroThumbX = new OneEuroFilter({minCutoff: 0.35, beta: 8.0});
@@ -552,6 +558,19 @@ export class AirMouseController {
     this.scrollReleaseCount = 0;
     this.fistFrames = 0;
     this.reset();
+  }
+
+  setActiveZone(zone) {
+    if (zone && Number.isFinite(zone.x) && Number.isFinite(zone.y) && Number.isFinite(zone.width) && Number.isFinite(zone.height)) {
+      this.activeZone = {
+        x: clamp(Number(zone.x), 0, 0.85),
+        y: clamp(Number(zone.y), 0, 0.85),
+        width: clamp(Number(zone.width), 0.10, 1.0),
+        height: clamp(Number(zone.height), 0.10, 1.0),
+      };
+    } else {
+      this.activeZone = null;
+    }
   }
 
   state(phase, events = [], progress = 0, extras = {}) {
@@ -688,7 +707,7 @@ export class AirMouseController {
     const gap = this.lastTime !== null && now - this.lastTime > MAX_GAP_MS;
     this.lastTime = now;
     const isIndexLike = this.pointerMode === 'index' || this.pointerMode === 'trigger';
-    const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll, this.pointerMode) : null;
+    const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll, this.pointerMode, this.activeZone) : null;
     if (!observed) {
       // Index/Trigger mode: a few dropped/poor frames must not break an ongoing drag.
       if (isIndexLike && (this.leftDown || this.rightDown) &&

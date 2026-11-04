@@ -1,7 +1,13 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MANUX · 손으로 움직이는 마우스</title><link rel="stylesheet" href="/styles.css"></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MANUX · 손으로 움직이는 마우스</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
 <body>
+<!-- Native Desktop Titlebar -->
 <div id="app-titlebar">
   <div class="titlebar-title">
     <span style="color:#46e5bd">●</span>
@@ -21,113 +27,228 @@
   document.getElementById('btn-win-max')?.addEventListener('click', () => window.manuxDesktop?.maximize?.());
 </script>
 
+<!-- Fullscreen Transparent HUD Overlay Elements -->
 <canvas id="overlay-hud-canvas"></canvas>
 <div id="overlay-hud-pill">
   <span class="brand-dot" style="color:#46e5bd">✦</span>
-  <span id="overlay-mode-badge" class="hud-badge">👆 1: 포인터 이동</span>
-  <button id="overlay-mode-toggle" type="button" class="hud-btn" title="트리거 / 핀치 제어 방식 전환">🔄 모드: 트리거</button>
-  <button id="overlay-exit-btn" type="button" class="hud-btn">🖥️ 창 모드로 복귀 (Esc)</button>
-  <button id="overlay-pip-btn" type="button" class="hud-btn">📷 캠 미리보기</button>
+  <span id="overlay-mode-badge" class="hud-badge">👆 1: 포인터 이동 (검지)</span>
+  <button id="overlay-pause-btn" type="button" class="hud-btn pause-btn" title="마우스 입력 일시 정지 / 재개">⏸️ 일시 정지</button>
+  <button id="overlay-pip-btn" type="button" class="hud-btn" title="카메라 작은 화면 띄우기">📷 캠 미리보기</button>
+  <button id="overlay-exit-btn" type="button" class="hud-btn">🖥️ 설정으로 복귀 (Esc)</button>
   <button id="overlay-stop-btn" type="button" class="hud-btn danger">⏹️ 제어 중지</button>
 </div>
 <div id="overlay-pip-box"></div>
 
-<header><img class="brand" src="/assets/manux.svg" alt="MANUX"><span class="header-note">손으로 움직이는 마우스</span><span class="local-tag">LOCAL DEMO · 03</span></header>
+<!-- Main App Setup View -->
+<header>
+  <img class="brand" src="/assets/manux.svg" alt="MANUX">
+  <span class="header-note">손으로 움직이는 마우스</span>
+  <span class="local-tag">AIR MOUSE PRO</span>
+</header>
+
 <main>
-  <section class="intro"><div><p class="eyebrow">YOUR HANDS, YOUR SPACE</p><h1>손을 움직이면,<br><span>커서도 함께.</span></h1></div><p class="intro-copy">카메라 앞에서 손동작으로 이동·클릭·스크롤.<br>먼저 연습하고, 데스크톱 앱에서 실제 마우스를 제어하세요.</p></section>
-  <div class="mode-tabs" role="tablist" aria-label="제어 방식"><button id="mode-media" type="button" role="tab" aria-selected="false" aria-controls="media-panel">영상 제어</button><button id="mode-mouse" type="button" role="tab" aria-selected="true" aria-controls="mouse-panel">마우스 제어</button></div>
+  <section class="intro">
+    <div>
+      <p class="eyebrow">NEXT-GEN CONTACTLESS CONTROL</p>
+      <h1>손을 움직이면,<br><span>커서도 함께.</span></h1>
+    </div>
+    <p class="intro-copy">
+      동작 영역을 설정하고 <strong>[에어 마우스 시작]</strong>을 누르면<br>
+      투명 오버레이 모드로 즉시 전환되어 Windows를 자유롭게 제어합니다.
+    </p>
+  </section>
+
   <div class="workspace">
-    <section id="media-panel" class="player-panel media-only" role="tabpanel" aria-labelledby="mode-media" hidden>
-      <div class="section-heading"><h2 id="player-title">영상 플레이어</h2><label class="file-button" for="video-file">영상 파일 열기<input id="video-file" type="file" accept="video/*"></label></div>
-      <div class="video-wrap"><video id="player" controls playsinline preload="metadata" aria-label="제어할 영상"></video><div class="video-empty" id="video-empty"><span class="empty-symbol">▶</span><strong>제어할 영상을 선택하세요</strong><p>MP4 · WebM 등 브라우저가 지원하는 파일</p><button id="demo-load" class="secondary">90초 테스트 영상 열기</button></div></div>
-      <div class="video-details"><span id="video-name">선택한 영상 없음</span><span id="time-display">00:00 / 00:00</span></div>
-      <div class="manual-controls" aria-label="영상 직접 조작"><button data-action="backward" disabled><span>−10</span>10초 뒤로</button><button data-action="play" disabled><span>▶</span>재생</button><button data-action="pause" disabled><span>Ⅱ</span>일시정지</button><button data-action="forward" disabled><span>+10</span>10초 앞으로</button></div>
-      <p id="media-message" class="message" role="status">파일은 이 브라우저에서만 재생됩니다.</p>
-    </section>
-    <section id="mouse-panel" class="mouse-panel" role="tabpanel" aria-labelledby="mode-mouse">
-      <div class="overlay-hero-banner" style="margin-bottom:14px; background:linear-gradient(135deg, #e6fcf5, #e0f2fe); border:1px solid #99f6e4; border-radius:12px; padding:16px; text-align:center;">
-        <button id="btn-enter-overlay" type="button" class="primary" style="font-size:15px; font-weight:700; padding:12px 24px; border-radius:9px; background:#0f766e; border-color:#0f766e; color:#fff; cursor:pointer; box-shadow:0 4px 14px rgba(15,118,110,0.35);">✨ 모니터 투명 HUD 오버레이 시작 (아이 트래커 방식)</button>
-        <p class="small-note" style="margin:8px 0 0; color:#0f766e; font-weight:600">모니터 전체 화면에 검지(8)·엄지(4)·소지(20)·중지(12) 네온 AR 포인트가 직접 떠오르며 앱을 가리지 않고 투명 제어합니다.</p>
+    <!-- Left Column: Quick Launch & Controls -->
+    <section class="mouse-panel">
+      <!-- Direct Launch Hero Card -->
+      <div class="overlay-hero-banner">
+        <button id="btn-start-air-mouse" type="button" class="btn-start-hero">
+          🚀 에어 마우스 시작 (투명 오버레이 모드)
+        </button>
+        <p class="hero-desc">
+          ✨ 클릭 한 번으로 모니터 전체가 투명해지며 손동작 네온 AR 타겟으로 모든 앱을 제어합니다.
+        </p>
       </div>
-      <div class="section-heading"><h2 id="mouse-title">Windows 마우스 제어</h2><span id="mouse-mode" class="status-pill">대기 중</span></div>
-      <div class="mouse-toolbar">
-        <label for="mouse-target">제어 대상</label>
-        <select id="mouse-target"><option value="desktop" selected>Windows 마우스</option><option value="practice">이 화면에서 연습</option></select>
-        <button id="mouse-stop" type="button" class="secondary">제어 중지</button>
+
+      <!-- Control Settings Card -->
+      <div class="settings-card">
+        <div class="section-heading">
+          <h2>마우스 제어 설정</h2>
+          <span id="mouse-mode" class="status-pill">대기 중</span>
+        </div>
+
+        <div class="mouse-toolbar">
+          <label for="mouse-target">제어 대상</label>
+          <select id="mouse-target">
+            <option value="desktop" selected>Windows 마우스</option>
+          </select>
+          <button id="mouse-stop" type="button" class="secondary">제어 중지</button>
+        </div>
+
+        <div class="mouse-control-row">
+          <label class="control-toggle">
+            <input id="mouse-enabled" type="checkbox">
+            <span>마우스 제어 활성화</span>
+          </label>
+          <label class="mouse-sensitivity" for="mouse-sensitivity">
+            이동 감도 <output id="mouse-sensitivity-output" for="mouse-sensitivity">1800</output>
+            <input type="range" id="mouse-sensitivity" min="600" max="3600" step="100" value="1800">
+          </label>
+        </div>
+
+        <div class="mouse-control-row options-grid">
+          <label class="control-toggle">
+            <input id="mouse-ballistics" type="checkbox" checked>
+            <span>인체공학 가속도 (손목 미세조작)</span>
+          </label>
+          <label class="control-toggle">
+            <input id="mouse-click-lock" type="checkbox" checked>
+            <span>클릭 흔들림 방지 (Position Lock)</span>
+          </label>
+          <label class="control-toggle">
+            <input id="mouse-cross-view" type="checkbox" checked>
+            <span>Cross-View 대각선 보정 (-22° · Y 2.2x)</span>
+          </label>
+        </div>
+
+        <p id="mouse-status" class="message" role="status">준비됐습니다. [에어 마우스 시작] 버튼을 누르세요.</p>
       </div>
-      <div class="mouse-control-row" style="margin-top:10px">
-        <label for="mouse-pointer-mode" style="font-size:12px; font-weight:600; color:var(--muted)">추적 패러다임</label>
-        <select id="mouse-pointer-mode">
-          <option value="trigger" selected>🔫 신형 트리거 모드 (권장): 검지 포인터(접으면 고정) + 엄지 펴서 좌클릭/드래그 + 소지 펴서 우클릭 + ✌️ 휠</option>
-          <option value="index">🤏 핀치 모드: 검지 포인터 + 엄지·중지 좌클릭 + 엄지·약지 우클릭 + ✌️ 휠</option>
-          <option value="palm">✋ 손바닥 코어 추적 (기존 클래식 방식)</option>
-        </select>
-      </div>
-      <p id="mouse-target-note" class="small-note">실제 Windows 커서를 제어합니다. Ctrl + Alt + M으로 어디서든 중지할 수 있습니다.</p>
-      <div id="mouse-pad" class="mouse-pad" aria-label="마우스 이동, 클릭, 드래그, 스크롤 연습 영역" hidden>
-        <div class="mouse-pad-label">PRACTICE</div>
-        <div class="mouse-click-task"><button id="mouse-click-target" type="button">여기를 클릭</button><span>좌클릭 <strong id="mouse-click-count">0</strong>회</span></div>
-        <div id="mouse-drag-zone" class="mouse-drag-zone" aria-hidden="true">이쪽으로 옮겨보세요</div>
-        <div id="mouse-drag-target" class="mouse-drag-target" aria-label="드래그 연습 조각"><span aria-hidden="true">⠿</span><strong>잡고 이동</strong></div>
-        <div class="mouse-scroll-task"><div class="mouse-scroll-heading"><strong>스크롤 연습</strong><span id="mouse-scroll-value">0px</span></div><div id="mouse-scroll-area" class="mouse-scroll-area" tabindex="0" aria-label="스크롤 연습 문서"><p><b>01</b>손목을 책상에 대고 편하게 펴세요.</p><p><b>02</b>V(가위) 제스처를 취하고 손을 위아래로 움직이세요.</p><p><b>03</b>글이 움직이면 스크롤 성공입니다.</p><p><b>04</b>손을 멈추면 스크롤도 멈춥니다.</p><p><b>05</b>손가락을 접거나 주먹을 쥐면 입력을 쉽니다.</p><p><b>06</b>다시 손을 편하게 펴면 커서를 움직입니다.</p><p><b>07</b>반대 방향으로도 움직여보세요.</p><p><b>08</b>끝까지 내려왔습니다.</p></div></div>
-        <div id="mouse-context-menu" class="mouse-context-menu" role="status" hidden><strong>우클릭 성공</strong><span>엄지와 약지를 떼면 다시 사용할 수 있어요.</span></div>
-        <div id="mouse-cursor" class="mouse-cursor" aria-hidden="true"><svg viewBox="0 0 28 36" width="28" height="36"><path d="M3 2L3 28L10 22L15 33L21 30L16 20L25 20Z" fill="currentColor" stroke="#112331" stroke-width="2" stroke-linejoin="round"/></svg></div>
-      </div>
-      <div class="mouse-control-row"><label class="control-toggle"><input id="mouse-enabled" type="checkbox" disabled><span>마우스 제어 켜기</span></label><label class="mouse-sensitivity" for="mouse-sensitivity">이동 감도 <output id="mouse-sensitivity-output" for="mouse-sensitivity">1800</output><input type="range" id="mouse-sensitivity" min="600" max="3600" step="100" value="1800"></label></div>
-      <div class="mouse-control-row" style="margin-top:10px"><label class="control-toggle"><input id="mouse-ballistics" type="checkbox" checked><span>인체공학 가속도 (손목 미세조작)</span></label><label class="control-toggle"><input id="mouse-click-lock" type="checkbox" checked><span>클릭 흔들림 방지 (Position Lock)</span></label><label class="control-toggle"><input id="mouse-cross-view" type="checkbox" checked><span>Cross-View 대각선 보정 (회전 -22° · Y축 2.2배)</span></label></div>
-      <p id="mouse-status" class="message" role="status">카메라를 시작한 뒤 마우스 제어를 켜세요.</p>
+
+      <!-- 4 Gesture Guide Cards -->
       <div class="mouse-guide" aria-label="마우스 손동작 안내">
-        <article data-mouse-mode="move"><span class="mouse-guide-number">01</span><div><h3>👆 검지 포인터 이동</h3><p>검지 끝(LM 8) 직접 추적<br>주먹 외 모든 자세 추적 · 떨림 방지</p></div></article>
-        <article data-mouse-mode="left"><span class="mouse-guide-number">02</span><div><h3>🤏 엄지+중지: 좌클릭 & 드래그</h3><p>엄지+중지 맞닿으면 좌클릭 & 더블클릭<br>검지 흔들림 0% · 연속 드래그</p></div></article>
-        <article data-mouse-mode="right"><span class="mouse-guide-number">03</span><div><h3>👆 엄지+약지: 우클릭</h3><p>엄지+약지 맞닿으면 우클릭<br>좌우 독립 판정 및 동시 클릭 가능</p></div></article>
-        <article data-mouse-mode="scroll"><span class="mouse-guide-number">04</span><div><h3>✌️ 제스처 2: 폰 터치 스크롤</h3><p>V자 펴고 위로 그으면 아래 스크롤<br>주먹 쥐어 손 떼기 (역스크롤 0%)</p></div></article>
+        <article data-mouse-mode="move">
+          <span class="mouse-guide-number">01</span>
+          <div>
+            <h3>👆 1: 포인터 이동 (검지)</h3>
+            <p>검지 끝(LM 8) 직접 추적<br>검지를 접으면 그 자리에 커서 고정 (Freeze)</p>
+          </div>
+        </article>
+        <article data-mouse-mode="left">
+          <span class="mouse-guide-number">02</span>
+          <div>
+            <h3>👍 엄지 펴기: 좌클릭 & 드래그</h3>
+            <p>엄지만 펴면 즉시 좌클릭 & 유지 시 드래그<br>검지 접고 엄지 펴면 흔들림 0% 정밀 클릭</p>
+          </div>
+        </article>
+        <article data-mouse-mode="right">
+          <span class="mouse-guide-number">03</span>
+          <div>
+            <h3>🤙 소지 펴기: 우클릭</h3>
+            <p>새끼손가락(소지)만 펴면 우클릭<br>엄지와 소지를 같이 펴면 동시 클릭</p>
+          </div>
+        </article>
+        <article data-mouse-mode="scroll">
+          <span class="mouse-guide-number">04</span>
+          <div>
+            <h3>🖐️ 손바닥 펴기: 휠 스크롤</h3>
+            <p>손바닥 활짝(🖐) 또는 V자(✌️) 펴고 위아래 이동 시 스크롤<br>주먹(✊) 쥐면 완전한 쉬는 자세</p>
+          </div>
+        </article>
       </div>
-      <p class="mouse-stop-note">💡 <b>Cross-View 권장 배치</b>: 웹캠을 <b>모니터 좌측 상단</b>에 두고 오른손을 <b>10~11시 대각선</b>으로 편안하게 두면 가려짐 없는 최상의 인식이 가능합니다.<br><kbd>Esc</kbd> 창 모드 복귀 · <kbd>F11</kbd> 오버레이 토글 · <kbd>Ctrl + Alt + M</kbd> 어디서든 비상 정지</p>
+
+      <p class="mouse-stop-note">
+        💡 <b>단축키 안내</b>: 어디서든 <kbd>Ctrl + Alt + M</kbd> 비상 정지 · 오버레이 중 <kbd>Esc</kbd> 설정 화면 복귀 · <kbd>F11</kbd> 오버레이 토글
+      </p>
     </section>
+
+    <!-- Right Column: Camera & Active Working Zone Setting -->
     <section class="camera-panel" aria-labelledby="camera-title">
-      <div class="section-heading"><h2 id="camera-title">손동작 인식</h2><span class="status-pill" id="camera-badge">카메라 꺼짐</span></div>
-      <div id="camera-preview-home"><div class="camera-wrap"><video id="camera" playsinline muted autoplay aria-label="웹캠 미리보기"></video><canvas id="landmarks" aria-hidden="true"></canvas><div id="camera-empty"><span>✋</span><p>손 전체가 화면에 들어오게<br>카메라를 배치하세요.</p></div><div class="camera-overlay"><span id="recognition-label">대기 중</span><span id="confidence"></span></div></div></div>
-      <div class="hold-track" aria-hidden="true"><div id="hold-progress"></div></div>
-      <div class="camera-options"><label for="resolution">요청 해상도</label><select id="resolution"><option value="480" selected>480p · 초고속 반응 (권장)</option><option value="720">720p</option><option value="1080">1080p</option></select></div>
-      <p id="camera-stats" class="small-note">연결 후 실제 입력 해상도를 표시합니다.</p>
-      <div class="camera-actions"><button id="camera-start" class="primary">카메라 시작</button><button id="camera-stop" class="secondary" disabled>카메라 끄기</button></div>
-      <label class="control-toggle media-only"><input id="gesture-enabled" type="checkbox" disabled><span>손동작 제어 켜기</span><kbd>Esc</kbd></label>
-      <label class="control-toggle repeat-toggle media-only"><input id="repeat-enabled" type="checkbox"><span>동작 유지 시 10초 이동 반복<small>앞으로·뒤로만 · 첫 실행 후 약 1초마다</small></span></label>
-      <p id="camera-message" class="message" role="status">카메라 시작 후 브라우저의 카메라 접근을 허용하세요.</p>
-      <details class="media-only"><summary>인식 설정 · 반응 조절</summary><label>동작 유지 시간 <output id="hold-output">0.30초</output><input type="range" id="hold-time" min="150" max="1000" step="50" value="300"></label><label>공통 모델 진입 점수 <output id="confidence-output">70%</output><input type="range" id="min-confidence" min="55" max="95" step="5" value="70"></label><p>점수는 정확도 백분율이 아닙니다. 개인 등록은 손 관절 특징으로 별도 판정합니다. 짧은 흔들림은 허용하며, 반복 옵션이 꺼져 있다면 같은 명령을 다시 쓰기 전에 중립 자세로 쉬거나 손을 0.5초 이상 내려주세요. 설정을 바꾸면 제어가 꺼집니다.</p></details>
+      <div class="section-heading">
+        <h2 id="camera-title">카메라 & 작업 동작 영역 (Active Zone)</h2>
+        <span class="status-pill" id="camera-badge">카메라 꺼짐</span>
+      </div>
+
+      <!-- Camera Preview with Interactive Active Zone Overlay -->
+      <div id="camera-preview-home">
+        <div class="camera-wrap">
+          <video id="camera" playsinline muted autoplay aria-label="웹캠 미리보기"></video>
+          <canvas id="landmarks" aria-hidden="true"></canvas>
+
+          <!-- 16:9 Active Zone Bounding Box Overlay -->
+          <div id="camera-active-zone" class="camera-active-zone">
+            <span class="zone-badge">🖥️ 모니터 100% 매핑 영역</span>
+            <div class="zone-corner tl"></div>
+            <div class="zone-corner tr"></div>
+            <div class="zone-corner bl"></div>
+            <div class="zone-corner br"></div>
+          </div>
+
+          <div id="camera-empty">
+            <span>✋</span>
+            <p>손 전체가 화면에 들어오게<br>카메라를 배치하세요.</p>
+          </div>
+
+          <div class="camera-overlay">
+            <span id="recognition-label">대기 중</span>
+            <span id="confidence"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active Zone Configuration Card -->
+      <div class="zone-config-card">
+        <div class="zone-config-header">
+          <strong>🎯 동작 영역 (Active Zone) 조절</strong>
+          <span class="small-desc">이 사각형 안의 손 움직임이 모니터 전체에 1:1 매핑됩니다.</span>
+        </div>
+        <p class="zone-help-note">
+          손을 화면 하단(작업 표시줄)으로 내릴 때 캠 밖으로 관절이 이탈하지 않도록 사각형을 중앙 상단에 배치하세요.
+        </p>
+
+        <!-- Preset Buttons -->
+        <div class="zone-preset-row">
+          <button id="btn-zone-default" type="button" class="zone-preset-btn">기본 (중앙 상단 권장)</button>
+          <button id="btn-zone-wide" type="button" class="zone-preset-btn">와이드 (넓은 반경)</button>
+          <button id="btn-zone-compact" type="button" class="zone-preset-btn">컴팩트 (손목 보호)</button>
+        </div>
+
+        <!-- Fine Tuning Sliders -->
+        <div class="zone-sliders-grid">
+          <label>
+            좌우 위치 (X) <output id="zone-x-output">20%</output>
+            <input type="range" id="zone-x" min="0" max="0.50" step="0.02" value="0.20">
+          </label>
+          <label>
+            상하 위치 (Y) <output id="zone-y-output">15%</output>
+            <input type="range" id="zone-y" min="0" max="0.50" step="0.02" value="0.15">
+          </label>
+          <label>
+            가로 폭 (Width) <output id="zone-width-output">60%</output>
+            <input type="range" id="zone-width" min="0.30" max="0.95" step="0.05" value="0.60">
+          </label>
+          <label>
+            세로 높이 (Height) <output id="zone-height-output">55%</output>
+            <input type="range" id="zone-height" min="0.30" max="0.95" step="0.05" value="0.55">
+          </label>
+        </div>
+      </div>
+
+      <!-- Camera Hardware Controls -->
+      <div class="camera-hardware-row">
+        <div class="camera-options">
+          <label for="resolution">해상도</label>
+          <select id="resolution">
+            <option value="480" selected>480p · 초고속 반응 (권장)</option>
+            <option value="720">720p</option>
+            <option value="1080">1080p</option>
+          </select>
+        </div>
+        <div class="camera-actions">
+          <button id="camera-start" class="primary">카메라 시작</button>
+          <button id="camera-stop" class="secondary" disabled>카메라 끄기</button>
+        </div>
+      </div>
+
+      <p id="camera-stats" class="small-note">연결 후 실제 입력 해상도와 FPS를 표시합니다.</p>
+      <p id="camera-message" class="message" role="status">카메라 시작 후 마우스 제어를 실행하세요.</p>
     </section>
   </div>
-  <section class="personal-panel media-only" aria-labelledby="personal-title">
-    <div class="section-heading"><div><p class="eyebrow">PERSONAL SETUP</p><h2 id="personal-title">사용자별 동작 등록</h2></div><span id="profile-mode" class="status-pill">공통 모델</span></div>
-    <div class="profile-grid">
-      <div><label class="field-label" for="profile-select">사용자</label><div class="field-row"><select id="profile-select"><option value="">공통 모델 사용</option></select><button id="profile-delete" class="text-button" disabled>삭제</button></div><form id="profile-form" class="field-row"><input id="profile-name" aria-label="새 사용자 이름" placeholder="새 사용자 이름" maxlength="32" required><button class="secondary" id="profile-add">추가</button></form></div>
-      <div><label class="field-label" for="environment">사용할 위치</label><select id="environment"><option value="desk">책상 앞</option><option value="sofa">소파 거리</option></select><p id="profile-status" class="small-note">사용자를 추가한 뒤 두 위치에서 각각 등록하세요.</p></div>
-      <div class="profile-actions"><label class="control-toggle"><input id="personal-enabled" type="checkbox" disabled><span>선택한 위치의 개인 등록 사용</span></label><button id="enroll-start" class="primary" disabled>이 위치에서 동작 등록</button></div>
-    </div>
-    <p id="profile-message" class="message" role="status">각 위치에서 네 동작과 중립 자세를 정면·좌·우·상·하로 등록합니다. 각도별 표본 수집과 별도 확인에 약 3분 이상 걸립니다.</p>
-    <dialog id="enrollment" class="enrollment" aria-labelledby="enroll-dialog-title" aria-describedby="enroll-dialog-note" hidden>
-      <div class="enroll-dialog-header"><div><p class="eyebrow">PERSONAL SETUP</p><h2 id="enroll-dialog-title">내 손동작 등록</h2></div><span class="status-pill">영상 제어 잠시 멈춤</span></div>
-      <p id="enroll-dialog-note" class="small-note">손 모양과 위치는 유지하고 손목을 천천히 돌리세요. 실제로 수집한 각도만 초록색으로 채워집니다.</p>
-      <div class="enroll-workspace">
-        <div class="enroll-preview-pane">
-          <div class="enroll-orbit"><svg id="enroll-ring" viewBox="0 0 400 400" role="img" aria-label="현재 동작의 각도별 수집 진행"><g id="enroll-ring-ticks"></g></svg><span id="enroll-orbit-title">정면 기준 준비</span><div id="enroll-preview-host"></div><span id="enroll-orbit-progress">0 / 5 각도</span></div>
-          <ol id="enroll-views" class="enroll-views" aria-label="각도별 진행"></ol>
-          <p id="enroll-quality" class="small-note">손 전체가 보이도록 위치를 맞춰주세요.</p>
-        </div>
-        <div class="enroll-guide">
-          <div class="enrollment-top"><span id="enroll-stage">등록 준비</span><span id="enroll-step"></span></div>
-          <div class="enrollment-target"><span id="enroll-icon" aria-hidden="true">✋</span><div><h3 id="enroll-pose">손바닥</h3><p id="enroll-instruction"></p></div><strong id="enroll-countdown"></strong></div>
-          <div class="enroll-tilt-row"><div id="enroll-aim" class="enroll-aim" aria-hidden="true"><span id="enroll-aim-target"></span><span id="enroll-aim-current"></span></div><div><strong id="enroll-angle-title">정면 기준 잡기</strong><p id="enroll-angle-hint">편한 정면 자세로 손을 잠시 고정하세요.</p><span id="enroll-angle-feedback"></span></div></div>
-          <progress id="enroll-progress" max="1" value="0" aria-label="현재 등록 단계 진행률"></progress>
-          <p id="enroll-samples" class="small-note">수집을 준비하고 있습니다.</p>
-          <p id="enroll-overall" class="small-note">전체 0 / 25 각도</p>
-        </div>
-      </div>
-      <div class="enroll-dialog-actions"><span class="small-note">Esc로 등록 취소</span><button id="enroll-retry" class="primary" hidden>이 단계 다시 시도</button><button id="enroll-cancel" class="secondary">등록 취소</button></div>
-    </dialog>
-    <p class="small-note">카메라 영상은 저장하지 않습니다. 관절 특징만 이 브라우저에 저장됩니다. 위치는 직접 선택하며, 손이 너무 작거나 화면 밖으로 잘리면 실행을 보류합니다.</p>
-  </section>
-  <section class="gestures media-only" aria-label="네 가지 손동작" hidden><article data-gesture="Open_Palm"><span class="gesture-icon">✋</span><div><h3>손바닥</h3><p>일시정지</p></div><span class="key">PAUSE</span></article><article data-gesture="Thumb_Up"><span class="gesture-icon">👍</span><div><h3>엄지척</h3><p>재생</p></div><span class="key">PLAY</span></article><article data-gesture="Victory"><span class="gesture-icon">✌️</span><div><h3>V 모양</h3><p>10초 앞으로</p></div><span class="key">+10 SEC</span></article><article data-gesture="Closed_Fist"><span class="gesture-icon">✊</span><div><h3>주먹</h3><p>10초 뒤로</p></div><span class="key">−10 SEC</span></article></section>
-  <section class="activity media-only" hidden><div class="section-heading"><h2>최근 실행</h2><button id="clear-log" class="text-button">기록 지우기</button></div><ol id="event-log"><li class="empty-log">동작을 실행하면 시간과 결과가 표시됩니다.</li></ol></section>
-  <footer><span>웹캠 영상은 서버로 전송하거나 저장하지 않습니다.</span><span>데스크톱 앱: Windows 마우스 제어 · 화면 투명 HUD 오버레이</span></footer>
-</main><script type="module" src="/src/app.js"></script></body></html>
+</main>
+
+<footer>
+  <span>MANUX Air Mouse · Contactless Human-Computer Interaction</span>
+  <span>Local Neural Inference (MediaPipe Tasks Vision)</span>
+</footer>
+</body>
+</html>
