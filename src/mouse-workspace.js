@@ -5,7 +5,7 @@ const LABELS = {
   move:'👆 포인터 이동 (검지)',
   left:'🤏 좌클릭 · 드래그 (엄지+중지)',
   right:'👆 우클릭 (엄지+약지)',
-  scroll:'✌️ 폰 터치 스크롤 (검지+중지)',
+  scroll:'🖐️ 폰 터치 스크롤 (손바닥 펴기/V자)',
   both:'🤏 좌우 동시 클릭 (엄지+중지+약지)'
 };
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -325,16 +325,16 @@ export class MouseWorkspace {
       return {x: u * w, y: v * h};
     };
 
-    const idx = state.activePos
+    const idx = (state.activePos && state.fingertips?.index && state.fingertips.index.visible !== false)
       ? { x: state.activePos.x * w, y: state.activePos.y * h }
-      : mapPoint(state.fingertips.index);
-    const thm = mapPoint(state.fingertips.thumb);
-    const mid = mapPoint(state.fingertips.middle);
-    const rng = state.fingertips.ring ? mapPoint(state.fingertips.ring) : null;
-    const pnk = state.fingertips.pinky ? mapPoint(state.fingertips.pinky) : null;
+      : (state.fingertips?.index && state.fingertips.index.visible !== false ? mapPoint(state.fingertips.index) : null);
+    const thm = (state.fingertips?.thumb && state.fingertips.thumb.visible !== false) ? mapPoint(state.fingertips.thumb) : null;
+    const mid = (state.fingertips?.middle && state.fingertips.middle.visible !== false) ? mapPoint(state.fingertips.middle) : null;
+    const rng = (state.fingertips?.ring && state.fingertips.ring.visible !== false) ? mapPoint(state.fingertips.ring) : null;
+    const pnk = (state.fingertips?.pinky && state.fingertips.pinky.visible !== false) ? mapPoint(state.fingertips.pinky) : null;
 
     // Connecting laser line between Thumb (4) and Middle (12) during left click / drag
-    if (state.mode === 'left' || state.mode === 'both') {
+    if ((state.mode === 'left' || state.mode === 'both') && thm && mid) {
       ctx.save();
       ctx.strokeStyle = '#10b981';
       ctx.lineWidth = 4;
@@ -352,7 +352,7 @@ export class MouseWorkspace {
     }
 
     // Connecting laser line between Thumb (4) and Ring (16) during right click
-    if ((state.mode === 'right' || state.mode === 'both') && rng) {
+    if ((state.mode === 'right' || state.mode === 'both') && thm && rng) {
       ctx.save();
       ctx.strokeStyle = '#3b82f6';
       ctx.lineWidth = 4;
@@ -369,54 +369,69 @@ export class MouseWorkspace {
       ctx.restore();
     }
 
-    // Twin stream guides during Smartphone Touch Scroll
+    // Stream guides during Smartphone Touch Scroll (Open Palm or V-Sign)
     if (state.mode === 'scroll') {
       ctx.save();
       ctx.strokeStyle = '#c084fc';
       ctx.lineWidth = 3;
       ctx.setLineDash([4, 4]);
       ctx.shadowColor = '#c084fc';
-      ctx.shadowBlur = 12;
+      ctx.shadowBlur = 14;
       ctx.beginPath();
-      ctx.moveTo(idx.x, idx.y);
-      ctx.lineTo(mid.x, mid.y);
-      ctx.stroke();
+      if (idx && mid && rng) {
+        ctx.moveTo(idx.x, idx.y);
+        ctx.lineTo(mid.x, mid.y);
+        ctx.lineTo(rng.x, rng.y);
+        ctx.stroke();
 
-      ctx.fillStyle = '#c084fc';
-      ctx.font = 'bold 12px "Segoe UI", sans-serif';
-      ctx.fillText('✌️ 폰 터치 스크롤', (idx.x + mid.x) / 2 + 15, (idx.y + mid.y) / 2 - 10);
+        ctx.fillStyle = '#c084fc';
+        ctx.font = 'bold 12px "Segoe UI", sans-serif';
+        ctx.fillText('🖐️ 손바닥 폰 터치 스크롤', mid.x + 15, mid.y);
+      } else if (idx && mid) {
+        ctx.moveTo(idx.x, idx.y);
+        ctx.lineTo(mid.x, mid.y);
+        ctx.stroke();
+
+        ctx.fillStyle = '#c084fc';
+        ctx.font = 'bold 12px "Segoe UI", sans-serif';
+        ctx.fillText('✌️ 폰 터치 스크롤', (idx.x + mid.x) / 2 + 15, (idx.y + mid.y) / 2 - 10);
+      }
       ctx.restore();
     }
 
-    // Thumb Point (Amber Glow)
-    ctx.save();
-    ctx.fillStyle = '#f59e0b';
-    ctx.shadowColor = '#f59e0b';
-    ctx.shadowBlur = 12;
-    ctx.beginPath();
-    ctx.arc(thm.x, thm.y, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#fef3c7';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(thm.x, thm.y, 12, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
+    // Thumb Point (Amber Glow - only shown when middle/ring is active or clicking)
+    if (thm && (mid || rng || state.mode === 'left' || state.mode === 'right')) {
+      ctx.save();
+      ctx.fillStyle = '#f59e0b';
+      ctx.shadowColor = '#f59e0b';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(thm.x, thm.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#fef3c7';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(thm.x, thm.y, 12, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Middle Point (Emerald Glow - Left Click)
-    ctx.save();
-    ctx.fillStyle = '#10b981';
-    ctx.shadowColor = '#10b981';
-    ctx.shadowBlur = 12;
-    ctx.beginPath();
-    ctx.arc(mid.x, mid.y, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#d1fae5';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(mid.x, mid.y, 12, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
+    if (mid) {
+      ctx.save();
+      ctx.fillStyle = '#10b981';
+      ctx.shadowColor = '#10b981';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(mid.x, mid.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#d1fae5';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(mid.x, mid.y, 12, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Ring Point (Sapphire Blue Glow - Right Click)
     if (rng) {
@@ -436,33 +451,38 @@ export class MouseWorkspace {
     }
 
     // Index Point (Cyan Glowing Reticle - Active Pointer Cursor)
-    ctx.save();
-    const isPointerActive = state.mode === 'move' || state.mode === 'left';
-    ctx.fillStyle = isPointerActive ? '#00f0ff' : '#64748b';
-    ctx.shadowColor = isPointerActive ? '#00f0ff' : '#00000000';
-    ctx.shadowBlur = isPointerActive ? 18 : 0;
-    ctx.beginPath();
-    ctx.arc(idx.x, idx.y, 7, 0, Math.PI * 2);
-    ctx.fill();
+    if (idx) {
+      ctx.save();
+      const isPointerActive = state.mode === 'move' || state.mode === 'left';
+      ctx.fillStyle = isPointerActive ? '#00f0ff' : '#64748b';
+      ctx.shadowColor = isPointerActive ? '#00f0ff' : '#00000000';
+      ctx.shadowBlur = isPointerActive ? 18 : 0;
+      ctx.beginPath();
+      ctx.arc(idx.x, idx.y, 7, 0, Math.PI * 2);
+      ctx.fill();
 
-    ctx.strokeStyle = isPointerActive ? '#22d3ee' : '#94a3b8';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(idx.x, idx.y, 18, 0, Math.PI * 2);
-    ctx.stroke();
+      ctx.strokeStyle = isPointerActive ? '#22d3ee' : '#94a3b8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(idx.x, idx.y, 18, 0, Math.PI * 2);
+      ctx.stroke();
 
-    // Crosshair ticks
-    const r1 = 12, r2 = 24;
-    ctx.beginPath();
-    ctx.moveTo(idx.x - r2, idx.y); ctx.lineTo(idx.x - r1, idx.y);
-    ctx.moveTo(idx.x + r1, idx.y); ctx.lineTo(idx.x + r2, idx.y);
-    ctx.moveTo(idx.x, idx.y - r2); ctx.lineTo(idx.x, idx.y - r1);
-    ctx.moveTo(idx.x, idx.y + r1); ctx.lineTo(idx.x, idx.y + r2);
-    ctx.stroke();
+      // Crosshair ticks
+      const r1 = 12, r2 = 24;
+      ctx.beginPath();
+      ctx.moveTo(idx.x - r2, idx.y); ctx.lineTo(idx.x - r1, idx.y);
+      ctx.moveTo(idx.x + r1, idx.y); ctx.lineTo(idx.x + r2, idx.y);
+      ctx.moveTo(idx.x, idx.y - r2); ctx.lineTo(idx.x, idx.y - r1);
+      ctx.moveTo(idx.x, idx.y + r1); ctx.lineTo(idx.x, idx.y + r2);
+      ctx.stroke();
 
-    if (isPointerActive) {
-      ctx.fillStyle = '#00f0ff';
-      ctx.font = '600 11px "Segoe UI", sans-serif';
+      if (isPointerActive) {
+        ctx.fillStyle = '#00f0ff';
+        ctx.font = '600 11px "Segoe UI", sans-serif';
+        ctx.fillText('INDEX [LM8]', idx.x + 22, idx.y - 12);
+      }
+      ctx.restore();
+    }
       ctx.fillText('INDEX [LM8]', idx.x + 22, idx.y - 12);
     }
     ctx.restore();

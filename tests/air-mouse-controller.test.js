@@ -439,6 +439,17 @@ test('pointerMode: index smartphone touch swipe scrolls down when swiping up, an
   // Moving hand down while in fist produces NO reverse scroll!
   const fistDown = s.feed('fist', {}, {landmarks: hand('fist', {y: 0.05})});
   assert.equal(fistDown.events.filter(e => e.type === 'scroll').length, 0);
+
+  // Open Palm Scroll (🖐️ 5 fingers open):
+  for (let i = 0; i < 4; i++) s.feed('move', {}, {landmarks: hand('open')});
+  const openTouch = s.feed('move', {}, {landmarks: hand('open')});
+  assert.equal(openTouch.mode, 'scroll', 'Open palm must activate scroll cleanly');
+  assert.equal(openTouch.events.filter(e => e.type === 'button').length, 0);
+
+  const openSwipeUp = s.feed('move', {}, {landmarks: hand('open', {y: -0.03})});
+  assert.equal(openSwipeUp.mode, 'scroll');
+  const openScrollEvent = openSwipeUp.events.find(e => e.type === 'scroll');
+  assert.ok(openScrollEvent && openScrollEvent.dy > 0, 'Open palm swiping up must scroll downward');
 });
 
 test('pointerMode: index rapid double-click, independent Left and Right, Fist is strictly idle with zero click', () => {

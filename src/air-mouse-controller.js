@@ -141,13 +141,23 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     // 5. Simultaneous Click: If both touch thumb, BOTH left and right are active!
     // 6. Rest / Idle: Strictly Fist (주먹: all curled).
 
-    // Pure Gesture 2: strictly V-sign (Index & Middle extended, Ring & Pinky curled into palm, fingers separated)
-    const isScrollGesture = allowVScroll &&
+    // === SCROLL GESTURE: Open Palm (🖐️ all fingers extended) OR clean V-sign (✌️) ===
+    // 100% collision-free: In Open Palm, Index, Middle, and Ring are ALL extended!
+    // During click (Left: Thumb+Middle, Right: Thumb+Ring), Ring/Pinky are curled into palm, so it NEVER triggers scroll!
+    const isOpenPalmScroll = allowVScroll &&
+      index && middle && ring &&
+      dist2D(points[8], points[0]) > palm * 1.10 &&
+      dist2D(points[12], points[0]) > palm * 1.10 &&
+      dist2D(points[16], points[0]) > palm * 1.00;
+
+    const isVSignScroll = allowVScroll &&
       index && middle && !ring && !pinky &&
       dist2D(points[16], points[0]) < palm * 1.10 &&
       dist2D(points[20], points[0]) < palm * 1.10 &&
       dTwoFinger > 0.16 &&
       dMiddle > 0.40 && dRing > 0.40 && dIndex > 0.40;
+
+    const isScrollGesture = isOpenPalmScroll || isVSignScroll;
 
     // Intentional Pinch Stance: Clicks ONLY allowed when index is actively aiming and not scrolling
     const canClick = !isFist && !isScrollGesture && indexAiming;
@@ -181,10 +191,15 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     }
 
     if (mode === 'scroll') {
-      anchor = {
-        x: (points[8].x + points[12].x) * 0.5,
-        y: (points[8].y + points[12].y) * 0.5,
-      };
+      anchor = isOpenPalmScroll
+        ? {
+            x: (points[8].x + points[12].x + points[16].x) / 3,
+            y: (points[8].y + points[12].y + points[16].y) / 3,
+          }
+        : {
+            x: (points[8].x + points[12].x) * 0.5,
+            y: (points[8].y + points[12].y) * 0.5,
+          };
     } else {
       anchor = {
         x: points[8].x,
@@ -220,13 +235,18 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     y: clamp((points[8].y - 0.20) / 0.48, 0, 1),
   };
 
+  const middleActive = pointerMode === 'index' ? (dist2D(points[12], points[0]) > palm * 0.88) : true;
+  const ringActive = pointerMode === 'index' ? (dist2D(points[16], points[0]) > palm * 0.85) : true;
+  const pinkyActive = pointerMode === 'index' ? (dist2D(points[20], points[0]) > palm * 0.85) : true;
+  const thumbActive = pointerMode === 'index' ? (dist2D(points[4], points[0]) > palm * 0.60 && !isFist) : true;
+
   const fingertips = {
-    index: {x: points[8].x, y: points[8].y},
-    thumb: {x: points[4].x, y: points[4].y},
-    middle: {x: points[12].x, y: points[12].y},
-    ring: {x: points[16].x, y: points[16].y},
-    pinky: {x: points[20].x, y: points[20].y},
-    wrist: {x: points[0].x, y: points[0].y},
+    index: {x: points[8].x, y: points[8].y, visible: (pointerMode !== 'index' || indexAiming)},
+    thumb: {x: points[4].x, y: points[4].y, visible: thumbActive},
+    middle: {x: points[12].x, y: points[12].y, visible: middleActive},
+    ring: {x: points[16].x, y: points[16].y, visible: ringActive},
+    pinky: {x: points[20].x, y: points[20].y, visible: pinkyActive},
+    wrist: {x: points[0].x, y: points[0].y, visible: true},
   };
 
   const unpinched = pointerMode === 'index'
@@ -384,12 +404,13 @@ export class AirMouseController {
       const mid = observed.fingertips.middle;
       const rng = observed.fingertips.ring;
       const pnk = observed.fingertips.pinky;
+      const idx = observed.fingertips.index;
       this.lastFingertips = {
-        index: observed.fingertips.index,
-        thumb: {x: this.euroThumbX.filter(thm.x, now), y: this.euroThumbY.filter(thm.y, now)},
-        middle: {x: this.euroMiddleX.filter(mid.x, now), y: this.euroMiddleY.filter(mid.y, now)},
-        ring: rng ? {x: this.euroRingX.filter(rng.x, now), y: this.euroRingY.filter(rng.y, now)} : null,
-        pinky: pnk ? {x: this.euroPinkyX.filter(pnk.x, now), y: this.euroPinkyY.filter(pnk.y, now)} : null,
+        index: idx ? {x: idx.x, y: idx.y, visible: idx.visible} : null,
+        thumb: thm ? {x: this.euroThumbX.filter(thm.x, now), y: this.euroThumbY.filter(thm.y, now), visible: thm.visible} : null,
+        middle: mid ? {x: this.euroMiddleX.filter(mid.x, now), y: this.euroMiddleY.filter(mid.y, now), visible: mid.visible} : null,
+        ring: rng ? {x: this.euroRingX.filter(rng.x, now), y: this.euroRingY.filter(rng.y, now), visible: rng.visible} : null,
+        pinky: pnk ? {x: this.euroPinkyX.filter(pnk.x, now), y: this.euroPinkyY.filter(pnk.y, now), visible: pnk.visible} : null,
         wrist: observed.fingertips.wrist,
       };
     } else {
