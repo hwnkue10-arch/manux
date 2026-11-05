@@ -30,11 +30,10 @@
 <!-- Fullscreen Transparent HUD Overlay Elements -->
 <canvas id="overlay-hud-canvas"></canvas>
 <div id="overlay-hud-pill">
+  <span class="hud-drag-handle" title="드래그하여 위치 이동">⋮⋮</span>
   <span class="brand-dot" style="color:#46e5bd">✦</span>
   <span id="overlay-mode-badge" class="hud-badge">👆 1: 포인터 이동 (검지)</span>
   <button id="overlay-pause-btn" type="button" class="hud-btn pause-btn" title="마우스 입력 일시 정지 / 재개">⏸️ 일시 정지</button>
-  <button id="overlay-record-btn" type="button" class="hud-btn record-btn" title="시계열 원본 데이터 녹화 시작/중지 (F8)">⏺️ 녹화 시작 (F8)</button>
-  <button id="overlay-dump-btn" type="button" class="hud-btn" title="현재 손 관절 좌표 및 내부 판단 상태를 파일로 저장">📸 F4 덤프</button>
   <button id="overlay-pip-btn" type="button" class="hud-btn" title="카메라 작은 화면 띄우기">📷 캠 미리보기</button>
   <button id="overlay-exit-btn" type="button" class="hud-btn">🖥️ 설정으로 복귀 (Esc)</button>
   <button id="overlay-stop-btn" type="button" class="hud-btn danger">⏹️ 제어 중지</button>
@@ -125,8 +124,32 @@
         </div>
         <p class="dataset-subhead">
           웹캠 앞에서 손 자세를 잡고 <strong>[Space]</strong>를 눌러 특정 각도의 단일 프레임 정답 표본을 수집합니다.<br>
-          <small style="color:var(--muted)">마우스 제어가 꺼진 상태에서 안전하게 인식 실패 사각지대(Corner Case)를 수집합니다.</small>
+          <small style="color:var(--muted)">마우스 제어가 꺼진 상태에서도 실시간 자세 판정이 유지되어 안전하게 표본을 수집합니다.</small>
         </p>
+
+        <!-- Capture Mode Slide Switch (Snapshot vs Continuous Stream) -->
+        <div class="studio-mode-switch-row">
+          <span class="mode-switch-title">수집 방식:</span>
+          <div class="studio-slide-switch" id="studio-mode-switcher" role="radiogroup" aria-label="수집 방식 전환">
+            <button type="button" id="btn-studio-mode-snap" class="slide-switch-btn active" data-studio-mode="snapshot" aria-checked="true">
+              📷 단일 캡처 (스냅샷)
+            </button>
+            <button type="button" id="btn-studio-mode-stream" class="slide-switch-btn" data-studio-mode="stream" aria-checked="false">
+              🎥 영상 연속 수집 (스트림)
+            </button>
+          </div>
+        </div>
+
+        <!-- Continuous Stream Filter & Settings Box (Shown in stream mode) -->
+        <div id="stream-options-box" class="stream-options-box" style="display: none;">
+          <label class="stream-filter-label" title="시스템 판정과 사용자 정답이 불일치하는 순간의 프레임만 표본으로 자동 누적">
+            <input type="checkbox" id="stream-discrepancy-only" checked />
+            <span>🚨 <strong>불일치(오인식 사각지대) 프레임만 자동 선별 수집</strong> (권장)</span>
+          </label>
+          <p class="stream-hint">
+            자세를 유지한 채 손목을 천천히 여러 각도로 회전하면, 시스템이 오인식하는 순간의 관절 데이터가 프레임 단위로 자동 기록됩니다.
+          </p>
+        </div>
 
         <!-- Live Judgment vs Ground Truth Comparison Box -->
         <div class="snapshot-compare-box" id="snapshot-compare-box">

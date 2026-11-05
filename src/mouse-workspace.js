@@ -189,12 +189,17 @@ export class MouseWorkspace {
     this.$('#btn-win-max')?.addEventListener('click', () => this.bridge?.maximize());
     this.$('#btn-win-close')?.addEventListener('click', () => this.bridge?.close());
 
-    this.$('#overlay-record-btn')?.addEventListener('click', () => {
-      this.toggleRecording();
+    // Studio Mode Slide Switch (Snapshot vs Continuous Stream)
+    this.$('#btn-studio-mode-snap')?.addEventListener('click', () => {
+      this.setStudioCaptureMode('snapshot');
     });
 
-    this.$('#overlay-dump-btn')?.addEventListener('click', () => {
-      this.triggerDebugDump();
+    this.$('#btn-studio-mode-stream')?.addEventListener('click', () => {
+      this.setStudioCaptureMode('stream');
+    });
+
+    this.$('#stream-discrepancy-only')?.addEventListener('change', e => {
+      this.snapshotStudio.setStreamDiscrepancyOnly(e.target.checked);
     });
 
     // Pose Snapshot Studio Action Pills
@@ -206,7 +211,11 @@ export class MouseWorkspace {
     });
 
     this.$('#btn-snapshot-capture')?.addEventListener('click', () => {
-      this.capturePoseSnapshot();
+      if (this.snapshotStudio.captureMode === 'stream') {
+        this.toggleStudioStream();
+      } else {
+        this.capturePoseSnapshot();
+      }
     });
 
     this.$('#btn-snapshot-undo')?.addEventListener('click', () => {
@@ -239,7 +248,11 @@ export class MouseWorkspace {
         void this.toggleOverlay(false);
       } else if (event.code === 'Space') {
         event.preventDefault();
-        this.capturePoseSnapshot();
+        if (this.snapshotStudio.captureMode === 'stream') {
+          this.toggleStudioStream();
+        } else {
+          this.capturePoseSnapshot();
+        }
       } else if (event.key === 'Backspace') {
         if (this.snapshotStudio.getSamples().length > 0) {
           event.preventDefault();
@@ -612,7 +625,8 @@ export class MouseWorkspace {
 
     // Pure AirMouseController execution with activeZone natively applied
     const controllerQuality = typeof quality === 'boolean' ? quality : Boolean(quality?.ok);
-    const state = this.controller.update({landmarks, now, quality: controllerQuality, handedness, width, height, enabled: this.enabled});
+    // Keep posture recognition actively evaluating even when OS mouse control is toggled off
+    const state = this.controller.update({landmarks, now, quality: controllerQuality, handedness, width, height, enabled: true});
     this.lastMouseState = state;
     if (state?.gates) {
       this.lastGates = state.gates;
@@ -620,6 +634,16 @@ export class MouseWorkspace {
 
     // Live update Pose Snapshot Studio comparison
     this.syncSnapshotStudioComparison(state, this.lastQuality);
+
+    // Continuous Stream Frame Processing (if studio stream mode is active)
+    if (this.snapshotStudio?.isStreaming) {
+      this.processStudioStreamFrame({
+        landmarks,
+        quality: this.lastQuality,
+        state,
+        now,
+      });
+    }
 
     // Raw Temporal Recording (Zero overhead when not active)
     if (this.recorder?.recording) {
@@ -672,15 +696,19 @@ export class MouseWorkspace {
       } else {
         this.status(hints[state.phase] || (state.mode === 'idle' ? '쉬는 중입니다 (주먹/휴식).' : (state.mode === 'scroll' ? '🖐️ 휠 스크롤 중 · 손을 위아래로 그으세요.' : (state.mode === 'frozen' ? '🔒 커서 고정됨 · 엄지를 펴서 클릭하세요.' : `${this.getModeLabel(state.mode)} 중`))));
       }
+    } else {
+      const modeLabel = this.getModeLabel(state.mode);
+      this.status(`손 감지 중 [${modeLabel}] · 마우스 제어가 꺼져 있어 커서는 움직이지 않습니다.`);
     }
 
-    const labelText = this.enabled ? this.getModeLabel(state.mode) : '대기 중';
+    const modeText = this.getModeLabel(state.mode);
+    const labelText = this.enabled ? modeText : `${modeText} (제어 꺼짐)`;
     const modeEl = this.$('#mouse-mode');
     if (modeEl) modeEl.textContent = labelText;
     const badgeEl = this.$('#overlay-mode-badge');
-    if (badgeEl) badgeEl.textContent = labelText;
+    if (badgeEl) badgeEl.textContent = this.enabled ? modeText : '대기 중';
 
-    this.root.querySelectorAll('[data-mouse-mode]').forEach(el => el.classList.toggle('active', this.enabled && el.dataset.mouseMode === state.mode));
+    this.root.querySelectorAll('[data-mouse-mode]').forEach(el => el.classList.toggle('active', el.dataset.mouseMode === state.mode));
 
     // Render AR HUD points on overlay canvas
     if (this.overlayActive) {
@@ -1341,6 +1369,40 @@ export class MouseWorkspace {
     this.showToast(`🗑️ ${count}개 표본이 모두 삭제되었습니다.`);
   }
 
+  setStudioCaptureMode(mode) {
+    this.snapshotStudio.setCaptureMode(mode);
+    this.syncSnapshotStudioUI();
+    const modeName = mode === 'stream' ? '영상 연속 수집 (스트림)' : '단일 캡처 (스냅샷)';
+    this.showToast(`수집 방식 전환: ${modeName}`);
+  }
+
+  toggleStudioStream() {
+    const isStreaming = this.snapshotStudio.toggleStream();
+    this.syncSnapshotStudioUI();
+    if (isStreaming) {
+      this.showToast(`🎥 영상 연속 수집 시작! (정답: ${this.snapshotStudio.selectedGroundTruth}) - [Space]로 중지`);
+    } else {
+      const total = this.snapshotStudio.getSamples().length;
+      this.showToast(`⏹️ 영상 수집 중지 (총 ${total}개 표본 수집됨)`);
+    }
+  }
+
+  processStudioStreamFrame({ landmarks, quality, state, now }) {
+    const mode = this.controller?.pointerMode ?? 'trigger';
+    const res = this.snapshotStudio.processStreamFrame({
+      groundTruthAction: this.snapshotStudio.selectedGroundTruth,
+      landmarks,
+      quality,
+      mode,
+      geometryState: state,
+      timestamp: now,
+    });
+
+    if (res.streamCaptured) {
+      this.syncSnapshotStudioUI();
+    }
+  }
+
   syncSnapshotStudioComparison(state, quality) {
     const predicted = state?.mode || 'idle';
     const groundTruth = this.snapshotStudio.selectedGroundTruth;
@@ -1388,6 +1450,28 @@ export class MouseWorkspace {
     const mode = this.controller?.pointerMode ?? 'trigger';
     const stats = this.snapshotStudio.getStats();
     const curAction = this.snapshotStudio.selectedGroundTruth;
+    const captureMode = this.snapshotStudio.captureMode;
+    const isStreaming = this.snapshotStudio.isStreaming;
+
+    // 0. Update Studio Mode Switcher & Stream Options
+    const snapBtn = this.$('#btn-studio-mode-snap');
+    const streamBtn = this.$('#btn-studio-mode-stream');
+    if (snapBtn && streamBtn) {
+      snapBtn.classList.toggle('active', captureMode === 'snapshot');
+      snapBtn.setAttribute('aria-checked', String(captureMode === 'snapshot'));
+      streamBtn.classList.toggle('active', captureMode === 'stream');
+      streamBtn.setAttribute('aria-checked', String(captureMode === 'stream'));
+    }
+
+    const streamOptsBox = this.$('#stream-options-box');
+    if (streamOptsBox) {
+      streamOptsBox.style.display = captureMode === 'stream' ? 'block' : 'none';
+    }
+
+    const discCheck = this.$('#stream-discrepancy-only');
+    if (discCheck) {
+      discCheck.checked = Boolean(this.snapshotStudio.streamDiscrepancyOnly);
+    }
 
     // 1. Update Action selection buttons
     this.root.querySelectorAll('#snapshot-actions-selector button')?.forEach(btn => {
@@ -1403,7 +1487,36 @@ export class MouseWorkspace {
       }
     });
 
-    // 2. Buttons enable/disable
+    // 2. Main Capture / Stream Button
+    const captureBtn = this.$('#btn-snapshot-capture');
+    if (captureBtn) {
+      if (captureMode === 'stream') {
+        if (isStreaming) {
+          captureBtn.textContent = '⏹️ 영상 수집 중지 (Space)';
+          captureBtn.classList.add('streaming-active');
+        } else {
+          captureBtn.textContent = '🎥 영상 연속 수집 시작 (Space)';
+          captureBtn.classList.remove('streaming-active');
+        }
+      } else {
+        captureBtn.textContent = '📷 자세 표본 캡처 (Space)';
+        captureBtn.classList.remove('streaming-active');
+      }
+    }
+
+    // 3. Status Pill
+    const statusPill = this.$('#snapshot-status-pill');
+    if (statusPill) {
+      if (isStreaming) {
+        statusPill.textContent = '🔴 영상 연속 수집 중...';
+        statusPill.className = 'status-pill on';
+      } else {
+        statusPill.textContent = captureMode === 'stream' ? '스트림 대기 (Space)' : '표본 채집 대기';
+        statusPill.className = 'status-pill on';
+      }
+    }
+
+    // 4. Buttons enable/disable
     const undoBtn = this.$('#btn-snapshot-undo');
     if (undoBtn) undoBtn.disabled = stats.total === 0;
 
@@ -1413,7 +1526,7 @@ export class MouseWorkspace {
     const clearBtn = this.$('#btn-snapshot-clear');
     if (clearBtn) clearBtn.disabled = stats.total === 0;
 
-    // 3. Stats Summary pills
+    // 5. Stats Summary pills
     const totalEl = this.$('#snap-stat-total');
     if (totalEl) totalEl.textContent = `총 ${stats.total}개 표본`;
 

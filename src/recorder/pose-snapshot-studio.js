@@ -22,10 +22,65 @@ export const SUPPORTED_ACTIONS = [
 ];
 
 export class PoseSnapshotStudio {
-  constructor({ maxSamples = 1000 } = {}) {
+  constructor({ maxSamples = 1000, streamThrottleMs = 50 } = {}) {
     this.maxSamples = Number.isFinite(maxSamples) && maxSamples > 0 ? maxSamples : 1000;
     this.samples = [];
     this.selectedGroundTruth = 'move';
+    this.captureMode = 'snapshot'; // 'snapshot' | 'stream'
+    this.isStreaming = false;
+    this.streamDiscrepancyOnly = true; // when true in stream mode, automatically collects only mismatch/failure frames
+    this.streamThrottleMs = Number.isFinite(streamThrottleMs) && streamThrottleMs >= 0 ? streamThrottleMs : 50;
+    this.lastStreamSampleTime = 0;
+  }
+
+  /**
+   * Set capture mode ('snapshot' for single frame capture, 'stream' for continuous frame stream).
+   */
+  setCaptureMode(mode) {
+    if (mode !== 'snapshot' && mode !== 'stream') {
+      throw new Error(`[PoseSnapshotStudio] Invalid capture mode: ${mode}. Must be 'snapshot' or 'stream'.`);
+    }
+    this.captureMode = mode;
+    if (mode === 'snapshot' && this.isStreaming) {
+      this.isStreaming = false;
+    }
+    return this.captureMode;
+  }
+
+  /**
+   * Start continuous stream collection.
+   */
+  startStream() {
+    this.captureMode = 'stream';
+    this.isStreaming = true;
+    this.lastStreamSampleTime = 0;
+    return true;
+  }
+
+  /**
+   * Stop continuous stream collection.
+   */
+  stopStream() {
+    this.isStreaming = false;
+    return false;
+  }
+
+  /**
+   * Toggle continuous stream collection on/off.
+   */
+  toggleStream() {
+    if (this.isStreaming) {
+      return this.stopStream();
+    }
+    return this.startStream();
+  }
+
+  /**
+   * Configure whether stream collection records only discrepancy (failure) frames or all frames.
+   */
+  setStreamDiscrepancyOnly(discrepancyOnly) {
+    this.streamDiscrepancyOnly = Boolean(discrepancyOnly);
+    return this.streamDiscrepancyOnly;
   }
 
   /**
@@ -115,6 +170,7 @@ export class PoseSnapshotStudio {
       timestamp: Number(Number(timestamp).toFixed(2)),
       isoTime,
       mode,
+      source: metadata.source || (this.isStreaming ? 'stream' : 'snapshot'),
       trackingValid: true,
       quality: qualityInfo,
       predictedAction,
@@ -145,6 +201,81 @@ export class PoseSnapshotStudio {
       success: true,
       sample,
       totalSamples: this.samples.length,
+    };
+  }
+
+  /**
+   * Process a live frame during continuous stream collection.
+   * If streaming is active, evaluates tracking quality, throttling, and discrepancy filters
+   * and records posture samples automatically.
+   */
+  processStreamFrame({
+    groundTruthAction = this.selectedGroundTruth,
+    landmarks = null,
+    quality = true,
+    mode = 'trigger',
+    geometryState = null,
+    screenshot = null,
+    timestamp = performance.now(),
+    isoTime = new Date().toISOString(),
+    metadata = {},
+  } = {}) {
+    if (!this.isStreaming) {
+      return { success: false, reason: 'stream_not_active' };
+    }
+
+    // 1. Throttle check
+    if (this.lastStreamSampleTime > 0 && (timestamp - this.lastStreamSampleTime) < this.streamThrottleMs) {
+      return { success: false, reason: 'throttled' };
+    }
+
+    // 2. Validate tracking validity and quality
+    const handTracked = Array.isArray(landmarks) && landmarks.length === 21;
+    const isQualityOk = typeof quality === 'object' && quality !== null
+      ? Boolean(quality.ok)
+      : Boolean(quality);
+
+    if (!handTracked || !isQualityOk) {
+      return { success: false, reason: !handTracked ? 'no_hand_tracked' : 'poor_tracking_quality' };
+    }
+
+    // 3. Extract Controller prediction
+    let predictedAction = 'idle';
+    if (geometryState && typeof geometryState === 'object') {
+      predictedAction = geometryState.mode || 'idle';
+    }
+    const isMatch = (predictedAction === groundTruthAction);
+
+    // 4. Discrepancy filter: If user enabled streamDiscrepancyOnly, capture ONLY mismatch/failure frames!
+    if (this.streamDiscrepancyOnly && isMatch) {
+      return { success: false, reason: 'match_skipped_discrepancy_only', predictedAction, groundTruthAction };
+    }
+
+    // 5. Capture sample
+    const result = this.captureSnapshot({
+      groundTruthAction,
+      landmarks,
+      quality,
+      mode,
+      geometryState,
+      screenshot,
+      timestamp,
+      isoTime,
+      metadata: {
+        ...metadata,
+        source: 'stream',
+        discrepancyOnlyFilter: this.streamDiscrepancyOnly,
+      },
+    });
+
+    if (result.success) {
+      this.lastStreamSampleTime = timestamp;
+    }
+
+    return {
+      ...result,
+      streamCaptured: result.success,
+      isDiscrepancy: !isMatch,
     };
   }
 
@@ -288,3 +419,4 @@ export class PoseSnapshotStudio {
     }
   }
 }
+

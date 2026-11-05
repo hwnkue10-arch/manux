@@ -193,3 +193,89 @@ test('PoseSnapshotStudio: toJSON() and toJSONL() produce valid schemas', () => {
   assert.equal(JSON.parse(lines[1]).groundTruthAction, 'move');
   assert.equal(JSON.parse(lines[2]).type, 'summary');
 });
+
+test('PoseSnapshotStudio: captureMode switching between snapshot and stream', () => {
+  const studio = new PoseSnapshotStudio();
+  assert.equal(studio.captureMode, 'snapshot');
+  assert.equal(studio.isStreaming, false);
+
+  studio.setCaptureMode('stream');
+  assert.equal(studio.captureMode, 'stream');
+
+  studio.startStream();
+  assert.equal(studio.isStreaming, true);
+
+  // Switching back to snapshot automatically stops active stream
+  studio.setCaptureMode('snapshot');
+  assert.equal(studio.captureMode, 'snapshot');
+  assert.equal(studio.isStreaming, false);
+
+  // Invalid mode throws
+  assert.throws(() => studio.setCaptureMode('invalid'), /Invalid capture mode/);
+});
+
+test('PoseSnapshotStudio: processStreamFrame handles continuous stream, throttling, and discrepancy filtering', () => {
+  const studio = new PoseSnapshotStudio({ streamThrottleMs: 50 });
+  const lm = createDummyLandmarks();
+
+  // 1. Inactive stream returns stream_not_active
+  const rInactive = studio.processStreamFrame({ landmarks: lm, timestamp: 100 });
+  assert.equal(rInactive.success, false);
+  assert.equal(rInactive.reason, 'stream_not_active');
+
+  // Start stream with discrepancy-only filtering
+  studio.startStream();
+  studio.setStreamDiscrepancyOnly(true);
+  studio.setSelectedGroundTruth('right_click');
+
+  // 2. Normal matching frame (predicted: right_click == groundTruth: right_click) -> skipped
+  const rMatch = studio.processStreamFrame({
+    landmarks: lm,
+    geometryState: { mode: 'right_click' },
+    timestamp: 200,
+  });
+  assert.equal(rMatch.success, false);
+  assert.equal(rMatch.reason, 'match_skipped_discrepancy_only');
+  assert.equal(studio.getSamples().length, 0);
+
+  // 3. Discrepancy frame (user holding right_click, but system predicted move at awkward angle) -> captured!
+  const rDisc = studio.processStreamFrame({
+    landmarks: lm,
+    geometryState: { mode: 'move' },
+    timestamp: 260,
+  });
+  assert.equal(rDisc.success, true);
+  assert.equal(rDisc.streamCaptured, true);
+  assert.equal(rDisc.isDiscrepancy, true);
+  assert.equal(studio.getSamples().length, 1);
+  assert.equal(studio.getSamples()[0].source, 'stream');
+  assert.equal(studio.getSamples()[0].isFailureSample, true);
+
+  // 4. Throttling: frame arriving too quickly (< 50ms) is skipped
+  const rThrottle = studio.processStreamFrame({
+    landmarks: lm,
+    geometryState: { mode: 'move' },
+    timestamp: 280, // only 20ms after 260
+  });
+  assert.equal(rThrottle.success, false);
+  assert.equal(rThrottle.reason, 'throttled');
+  assert.equal(studio.getSamples().length, 1);
+
+  // 5. With streamDiscrepancyOnly = false, matching frames are also recorded
+  studio.setStreamDiscrepancyOnly(false);
+  const rAll = studio.processStreamFrame({
+    landmarks: lm,
+    geometryState: { mode: 'right_click' },
+    timestamp: 330,
+  });
+  assert.equal(rAll.success, true);
+  assert.equal(rAll.streamCaptured, true);
+  assert.equal(rAll.isDiscrepancy, false);
+  assert.equal(studio.getSamples().length, 2);
+
+  // 6. Stop stream
+  studio.stopStream();
+  assert.equal(studio.isStreaming, false);
+});
+
+
