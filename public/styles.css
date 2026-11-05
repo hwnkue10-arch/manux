@@ -897,139 +897,120 @@ body.overlay-mode.show-pip #overlay-pip-box {
 }
 
 /* ============================================================
-   ManuX Human-in-the-Loop Dataset Collection & Annotation UI
+   ManuX Pose Snapshot Studio (STEP 2-C: Spatial Recognition)
    ============================================================ */
 
-/* HUD Annotation Floating Bar */
-.hud-annotation-bar {
-  display: none;
-  position: fixed;
-  top: 76px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 999998;
-  background: rgba(15, 28, 40, 0.94);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(70, 229, 189, 0.35);
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
-  border-radius: 100px;
-  padding: 5px 14px;
-  align-items: center;
-  gap: 12px;
-  color: #fff;
-  pointer-events: auto;
-  user-select: none;
-  transition: all 0.2s ease;
-}
-
-body.overlay-mode .hud-annotation-bar {
-  display: flex;
-}
-
-.hud-ann-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.hud-ann-badge-mode {
-  background: rgba(70, 229, 189, 0.15);
-  border: 1px solid rgba(70, 229, 189, 0.5);
-  color: #46e5bd;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 12px;
-  text-transform: uppercase;
-}
-
-.hud-ann-badge-target {
-  font-size: 13px;
-  font-weight: 700;
-  color: #fff;
-}
-
-.hud-ann-badge-status {
-  font-size: 12px;
-  color: #94a3b8;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.hud-ann-badge-status.active {
-  color: #fef08a;
-  background: rgba(234, 179, 8, 0.25);
-  border: 1px solid rgba(234, 179, 8, 0.6);
-  animation: recPulse 1.2s infinite ease-in-out;
-}
-
-.hud-ann-badge-trial {
-  font-size: 12px;
-  font-weight: 600;
-  color: #38bdf8;
-}
-
-.hud-ann-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.hud-ann-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-radius: 20px;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.hud-ann-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.2);
-  transform: translateY(-1px);
-}
-
-.hud-ann-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.hud-ann-btn.primary {
-  background: rgba(70, 229, 189, 0.25);
-  border-color: #46e5bd;
-  color: #46e5bd;
-}
-
-.hud-ann-btn.primary.active-performing {
-  background: rgba(239, 68, 68, 0.45);
-  border-color: #ef4444;
-  color: #fff;
-  animation: recPulse 1.2s infinite ease-in-out;
-}
-
-.hud-ann-btn.warning {
-  background: rgba(245, 158, 11, 0.15);
-  border-color: rgba(245, 158, 11, 0.5);
-  color: #fbbf24;
-}
-
-/* Main Dashboard Dataset Card */
-.dataset-card {
+.snapshot-studio-card {
   margin-top: 20px;
 }
 
-.dataset-subhead {
-  font-size: 13px;
+.ground-truth-label-heading {
+  font-size: 12px;
   color: var(--muted);
-  margin: -4px 0 14px;
-  line-height: 1.45;
+  margin-bottom: 8px;
+  font-weight: 600;
 }
 
+/* Real-time Comparison Box: System vs Ground Truth */
+.snapshot-compare-box {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+
+.snapshot-compare-box.discrepancy-active {
+  background: #fff5f5;
+  border-color: #f87171;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.15);
+}
+
+.compare-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.compare-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.compare-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.compare-badge {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.compare-badge.system {
+  background: #0f172a;
+  color: #38bdf8;
+  border: 1px solid #0284c7;
+}
+
+.compare-badge.target {
+  background: #064e3b;
+  color: #34d399;
+  border: 1px solid #059669;
+}
+
+.compare-arrow {
+  font-size: 16px;
+  color: #94a3b8;
+  font-weight: bold;
+}
+
+.compare-diagnosis-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.match-indicator {
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.match-indicator.match {
+  color: #059669;
+  background: #d1fae5;
+}
+
+.match-indicator.discrepancy {
+  color: #dc2626;
+  background: #fee2e2;
+  animation: recPulse 1.4s infinite ease-in-out;
+}
+
+.tracking-indicator {
+  font-size: 11px;
+  font-weight: 600;
+  color: #059669;
+}
+
+.tracking-indicator.bad {
+  color: #dc2626;
+}
+
+/* Action Selector Buttons Grid */
 .dataset-actions-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1065,7 +1046,7 @@ body.overlay-mode .hud-annotation-bar {
 }
 
 .action-pill-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: not-allowed;
   background: #f8faf9;
   border-color: #e2e8f0;
@@ -1099,82 +1080,10 @@ body.overlay-mode .hud-annotation-bar {
   color: #fff;
 }
 
-.dataset-trial-box {
-  background: #f8faf9;
-  border: 1px solid #d4dfd8;
-  border-radius: 10px;
-  padding: 12px 16px;
-  margin-bottom: 14px;
-}
-
-.dataset-trial-box.recording-trial {
-  border-color: #ef4444;
-  background: #fff5f5;
-  box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
-}
-
-.trial-meta-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.trial-meta-row strong {
-  font-size: 14px;
-  color: #1a2f26;
-}
-
-.trial-counter-badge {
-  font-size: 12px;
-  font-weight: 700;
-  color: #0f766e;
-  background: #ccfbf1;
-  padding: 3px 9px;
-  border-radius: 12px;
-}
-
-.trial-instruction-text {
-  font-size: 13px;
-  color: #374151;
-  margin: 0 0 10px;
-  line-height: 1.45;
-}
-
-.trial-status-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 12px;
-}
-
-.trial-status-badge {
-  font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 6px;
-}
-
-.trial-status-badge.idle {
-  color: #64748b;
-  background: #e2e8f0;
-}
-
-.trial-status-badge.performing {
-  color: #991b1b;
-  background: #fee2e2;
-  border: 1px solid #f87171;
-  animation: recPulse 1.2s infinite ease-in-out;
-}
-
-.trial-metrics {
-  color: #64748b;
-  font-family: monospace;
-  font-size: 12px;
-}
-
-.dataset-controls-toolbar {
+/* Snapshot Controls Toolbar */
+.snapshot-controls-toolbar {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr 1fr;
+  grid-template-columns: 1.5fr 1fr 1fr 0.8fr;
   gap: 8px;
   margin-bottom: 12px;
 }
@@ -1202,21 +1111,15 @@ body.overlay-mode .hud-annotation-bar {
   cursor: not-allowed;
 }
 
-.dataset-btn.primary {
+.dataset-btn.primary.capture-btn {
   background: #0f3529;
   border-color: #0f3529;
   color: #46e5bd;
+  font-weight: 700;
 }
 
-.dataset-btn.primary:hover:not(:disabled) {
+.dataset-btn.primary.capture-btn:hover:not(:disabled) {
   background: #144637;
-}
-
-.dataset-btn.primary.active-performing {
-  background: #dc2626;
-  border-color: #dc2626;
-  color: #fff;
-  animation: recPulse 1.2s infinite ease-in-out;
 }
 
 .dataset-btn.warning {
@@ -1225,33 +1128,52 @@ body.overlay-mode .hud-annotation-bar {
   color: #b45309;
 }
 
-.dataset-btn.record {
-  background: #fef2f2;
-  border-color: #fca5a5;
-  color: #dc2626;
+.dataset-btn.success {
+  background: #f0fdf4;
+  border-color: #86efac;
+  color: #15803d;
 }
 
-.dataset-btn.record.recording-active {
-  background: #dc2626;
-  border-color: #b91c1c;
-  color: #fff;
+.dataset-btn.secondary {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #475569;
 }
 
-.dataset-summary-row {
+/* Summary Stats Footer */
+.snapshot-summary-row {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--muted);
-  padding-top: 8px;
+  padding-top: 10px;
   border-top: 1px solid #e5ede8;
 }
 
 .summary-pill {
-  background: #e6f0eb;
-  padding: 2px 8px;
+  padding: 3px 9px;
   border-radius: 12px;
   font-weight: 600;
-  color: #1b382d;
+  font-size: 11px;
+}
+
+.summary-pill.total {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.summary-pill.matches {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.summary-pill.discrepancies {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.summary-pill.mode {
+  background: #f3e8ff;
+  color: #7e22ce;
 }
 

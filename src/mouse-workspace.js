@@ -1,3 +1,4 @@
+import {PoseSnapshotStudio, SUPPORTED_ACTIONS} from './recorder/pose-snapshot-studio.js';
 import {RawTemporalRecorder} from './recorder/raw-temporal-recorder.js';
 import {AirMouseController} from './air-mouse-controller.js';
 
@@ -10,14 +11,7 @@ const LANDMARK_NAMES = [
   'PINKY_MCP', 'PINKY_PIP', 'PINKY_DIP', 'PINKY_TIP'
 ];
 
-export const DATASET_ACTIONS = [
-  { id: 'move', key: '1', label: 'move (포인터 이동)', icon: '👆', desc: '손바닥을 안정적으로 유지하며 커서를 부드럽게 이동합니다.', modes: ['trigger', 'index'] },
-  { id: 'freeze', key: '2', label: 'freeze (포인터 고정)', icon: '🔒', desc: 'Trigger 모드 전용: 검지를 접어 커서를 고정합니다. (Index 모드 미지원)', modes: ['trigger'] },
-  { id: 'left_click', key: '3', label: 'left_click (좌클릭)', icon: '👍', desc: 'Trigger 모드: 엄지를 펴서 좌클릭 수행 / Index 모드: 엄지-검지 핀치', modes: ['trigger', 'index'] },
-  { id: 'right_click', key: '4', label: 'right_click (우클릭)', icon: '🤙', desc: 'Trigger 모드: 새끼손가락을 펴서 우클릭 / Index 모드: 엄지-약지 터치', modes: ['trigger', 'index'] },
-  { id: 'scroll', key: '5', label: 'scroll (스크롤)', icon: '🖐️', desc: 'Trigger 모드: 손바닥(🖐️) 또는 V자(✌️) 상하 이동 / Index 모드: 스와이프', modes: ['trigger', 'index'] },
-  { id: 'idle', key: '6', label: 'idle (중립/휴식)', icon: '✊', desc: '마우스 제어 동작을 하지 않는 편안한 휴식/주먹 자세를 유지합니다.', modes: ['trigger', 'index'] },
-];
+export const DATASET_ACTIONS = SUPPORTED_ACTIONS;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -75,6 +69,7 @@ export class MouseWorkspace {
 
     this.controller = createController();
     this.recorder = new RawTemporalRecorder();
+    this.snapshotStudio = new PoseSnapshotStudio();
     this.selectedAction = 'move';
     this.trialCounts = { move: 0, freeze: 0, left_click: 0, right_click: 0, scroll: 0, idle: 0 };
     this.targetTrials = 10;
@@ -125,7 +120,11 @@ export class MouseWorkspace {
       if (newMode === 'index' && this.selectedAction === 'freeze') {
         this.selectedAction = 'move';
       }
+      if (newMode === 'index' && this.snapshotStudio.selectedGroundTruth === 'freeze') {
+        this.snapshotStudio.selectedGroundTruth = 'move';
+      }
       this.syncDatasetUI();
+      this.syncSnapshotStudioUI();
     });
 
     const updateSettings = (msg) => {
@@ -198,48 +197,28 @@ export class MouseWorkspace {
       this.triggerDebugDump();
     });
 
-    // Dataset Collection Action selection pills
-    this.root.querySelectorAll('#dataset-actions-selector button')?.forEach(btn => {
+    // Pose Snapshot Studio Action Pills
+    this.root.querySelectorAll('#snapshot-actions-selector button')?.forEach(btn => {
       btn.addEventListener('click', () => {
         const action = btn.dataset.action;
-        if (action) this.selectAction(action);
+        if (action) this.setGroundTruthAction(action);
       });
     });
 
-    this.$('#btn-trial-toggle')?.addEventListener('click', () => {
-      this.toggleActionAnnotation();
+    this.$('#btn-snapshot-capture')?.addEventListener('click', () => {
+      this.capturePoseSnapshot();
     });
 
-    this.$('#btn-trial-cancel')?.addEventListener('click', () => {
-      this.cancelActionAnnotation();
+    this.$('#btn-snapshot-undo')?.addEventListener('click', () => {
+      this.undoPoseSnapshot();
     });
 
-    this.$('#btn-trial-next')?.addEventListener('click', () => {
-      this.nextAction();
+    this.$('#btn-snapshot-download')?.addEventListener('click', () => {
+      this.downloadPoseSnapshots();
     });
 
-    this.$('#btn-dataset-record-toggle')?.addEventListener('click', () => {
-      this.toggleRecording();
-    });
-
-    this.$('#hud-ann-toggle-btn')?.addEventListener('click', () => {
-      this.toggleActionAnnotation();
-    });
-
-    this.$('#hud-ann-cancel-btn')?.addEventListener('click', () => {
-      this.cancelActionAnnotation();
-    });
-
-    this.$('#hud-ann-next-btn')?.addEventListener('click', () => {
-      this.nextAction();
-    });
-
-    const hudAnnBar = this.$('#overlay-annotation-bar');
-    hudAnnBar?.addEventListener('mouseenter', () => {
-      if (this.overlayActive && this.bridge) this.bridge.setIgnoreMouse(false);
-    });
-    hudAnnBar?.addEventListener('mouseleave', () => {
-      if (this.overlayActive && this.bridge) this.bridge.setIgnoreMouse(true);
+    this.$('#btn-snapshot-clear')?.addEventListener('click', () => {
+      this.clearPoseSnapshots();
     });
 
     window.addEventListener('keydown', event => {
@@ -260,27 +239,27 @@ export class MouseWorkspace {
         void this.toggleOverlay(false);
       } else if (event.code === 'Space') {
         event.preventDefault();
-        this.toggleActionAnnotation();
+        this.capturePoseSnapshot();
       } else if (event.key === 'Backspace') {
-        if (this.recorder?.getCurrentAnnotation() || (this.trialCounts[this.selectedAction] || 0) > 0) {
+        if (this.snapshotStudio.getSamples().length > 0) {
           event.preventDefault();
-          this.cancelActionAnnotation();
+          this.undoPoseSnapshot();
         }
       } else if (event.key === 'Tab') {
         event.preventDefault();
-        this.nextAction();
+        this.nextGroundTruthAction();
       } else if (event.key === '1') {
-        this.selectAction('move');
+        this.setGroundTruthAction('move');
       } else if (event.key === '2') {
-        this.selectAction('freeze');
+        this.setGroundTruthAction('freeze');
       } else if (event.key === '3') {
-        this.selectAction('left_click');
+        this.setGroundTruthAction('left_click');
       } else if (event.key === '4') {
-        this.selectAction('right_click');
+        this.setGroundTruthAction('right_click');
       } else if (event.key === '5') {
-        this.selectAction('scroll');
+        this.setGroundTruthAction('scroll');
       } else if (event.key === '6' || event.key === '0') {
-        this.selectAction('idle');
+        this.setGroundTruthAction('idle');
       }
     });
 
@@ -311,6 +290,7 @@ export class MouseWorkspace {
     this.renderTarget();
     this.refresh();
     this.syncDatasetUI();
+    this.syncSnapshotStudioUI();
   }
 
   initInteractiveZone() {
@@ -624,8 +604,9 @@ export class MouseWorkspace {
     if (!this.active && !this.overlayActive) return null;
     if (this.enabled && latency > 450) this.stop('추적 지연이 높아 제어를 껐습니다. 해상도를 낮추고 다시 켜보세요.');
 
-    // Cache frame diagnostics for F4 debug snapshot
+    // Cache frame diagnostics for F4 debug snapshot & Pose Snapshot Studio
     this.lastLandmarks = landmarks;
+    this.lastQuality = qualityDetail || quality;
     this.lastDimensions = {width, height};
     this.lastLatency = latency;
 
@@ -636,6 +617,9 @@ export class MouseWorkspace {
     if (state?.gates) {
       this.lastGates = state.gates;
     }
+
+    // Live update Pose Snapshot Studio comparison
+    this.syncSnapshotStudioComparison(state, this.lastQuality);
 
     // Raw Temporal Recording (Zero overhead when not active)
     if (this.recorder?.recording) {
@@ -1247,5 +1231,199 @@ export class MouseWorkspace {
       sessionBadge.textContent = isRecording ? '⏺️ 녹화 중 (F8로 저장)' : '녹화 대기 (F8)';
       sessionBadge.className = `status-pill ${isRecording ? 'on' : ''}`;
     }
+  }
+
+  setGroundTruthAction(actionId) {
+    const mode = this.controller?.pointerMode ?? 'trigger';
+    const res = this.snapshotStudio.setSelectedGroundTruth(actionId, mode);
+    if (!res.success) {
+      this.showToast(`⚠️ ${mode.toUpperCase()} 모드에서는 '${actionId}' 동작을 지원하지 않습니다.`);
+      return false;
+    }
+    this.syncSnapshotStudioUI();
+    this.showToast(`🎯 정답 지정: ${res.action.label}`);
+    return true;
+  }
+
+  nextGroundTruthAction() {
+    const mode = this.controller?.pointerMode ?? 'trigger';
+    const supported = SUPPORTED_ACTIONS.filter(a => a.modes.includes(mode));
+    if (supported.length === 0) return;
+    const curIdx = supported.findIndex(a => a.id === this.snapshotStudio.selectedGroundTruth);
+    const nextIdx = (curIdx + 1) % supported.length;
+    this.setGroundTruthAction(supported[nextIdx].id);
+  }
+
+  capturePoseSnapshot() {
+    const mode = this.controller?.pointerMode ?? 'trigger';
+    const landmarks = this.lastLandmarks;
+    const quality = this.lastQuality || true;
+    const geometryState = this.lastMouseState;
+
+    if (!landmarks || landmarks.length !== 21) {
+      this.showToast('⚠️ 손이 감지되지 않아 캡처할 수 없습니다. 카메라 앞에 손을 대세요.');
+      return;
+    }
+
+    const isOk = typeof quality === 'object' && quality !== null ? quality.ok : Boolean(quality);
+    if (!isOk) {
+      this.showToast('⚠️ 추적 품질이 불량하여 캡처가 차단되었습니다.');
+      return;
+    }
+
+    // Try capturing current video frame snapshot as dataURL if available
+    let snapDataUrl = null;
+    try {
+      const video = this.$('#camera') || document.querySelector('video');
+      const lmCanvas = this.$('#landmarks') || document.querySelector('canvas#landmarks');
+      if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+        const snapCanvas = document.createElement('canvas');
+        snapCanvas.width = video.videoWidth;
+        snapCanvas.height = video.videoHeight;
+        const sctx = snapCanvas.getContext('2d');
+        sctx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
+        if (lmCanvas && lmCanvas.width > 0) {
+          sctx.drawImage(lmCanvas, 0, 0, snapCanvas.width, snapCanvas.height);
+        }
+        snapDataUrl = snapCanvas.toDataURL('image/jpeg', 0.75);
+      }
+    } catch {}
+
+    const res = this.snapshotStudio.captureSnapshot({
+      groundTruthAction: this.snapshotStudio.selectedGroundTruth,
+      landmarks,
+      quality,
+      mode,
+      geometryState,
+      screenshot: snapDataUrl,
+    });
+
+    if (!res.success) {
+      this.showToast(`⚠️ 캡처 실패: ${res.reason}`);
+      return;
+    }
+
+    const sample = res.sample;
+    this.syncSnapshotStudioUI();
+
+    if (sample.isFailureSample) {
+      this.showToast(`🚨 취약 각도 표본 채집! (시스템: ${sample.predictedAction} ➔ 정답: ${sample.groundTruthAction})`);
+    } else {
+      this.showToast(`✅ 정상 일치 표본 채집 (${sample.groundTruthAction})`);
+    }
+  }
+
+  undoPoseSnapshot() {
+    const undone = this.snapshotStudio.deleteLastSample();
+    if (undone) {
+      this.syncSnapshotStudioUI();
+      this.showToast(`↩️ 직전 표본 삭제됨: [${undone.groundTruthAction}] (남은 표본: ${this.snapshotStudio.getSamples().length}개)`);
+    }
+  }
+
+  downloadPoseSnapshots() {
+    const samples = this.snapshotStudio.getSamples();
+    if (samples.length === 0) {
+      this.showToast('⚠️ 저장할 표본이 없습니다.');
+      return;
+    }
+    const ok = this.snapshotStudio.downloadJSON();
+    if (ok) {
+      this.showToast(`💾 표본 데이터셋 다운로드 완료 (${samples.length}개 표본 저장됨)`);
+    } else {
+      this.showToast('⚠️ 파일 다운로드 실패');
+    }
+  }
+
+  clearPoseSnapshots() {
+    const count = this.snapshotStudio.clearSamples();
+    this.syncSnapshotStudioUI();
+    this.showToast(`🗑️ ${count}개 표본이 모두 삭제되었습니다.`);
+  }
+
+  syncSnapshotStudioComparison(state, quality) {
+    const predicted = state?.mode || 'idle';
+    const groundTruth = this.snapshotStudio.selectedGroundTruth;
+
+    const predEl = this.$('#live-predicted-action');
+    if (predEl) predEl.textContent = predicted;
+
+    const gtDef = SUPPORTED_ACTIONS.find(a => a.id === groundTruth) || SUPPORTED_ACTIONS[0];
+    const gtEl = this.$('#live-ground-truth-action');
+    if (gtEl) gtEl.textContent = `${gtDef.icon} ${gtDef.key}: ${gtDef.id}`;
+
+    const compareBox = this.$('#snapshot-compare-box');
+    const matchIndicator = this.$('#compare-match-indicator');
+    const isMatch = (predicted === groundTruth);
+
+    if (compareBox) {
+      compareBox.classList.toggle('discrepancy-active', !isMatch);
+    }
+
+    if (matchIndicator) {
+      if (isMatch) {
+        matchIndicator.textContent = `✅ 일치 (시스템: ${predicted} == 정답: ${groundTruth})`;
+        matchIndicator.className = 'match-indicator match';
+      } else {
+        matchIndicator.textContent = `🚨 불일치 감지! (시스템: ${predicted} ➔ 정답: ${groundTruth}) [취약 각도]`;
+        matchIndicator.className = 'match-indicator discrepancy';
+      }
+    }
+
+    const isTracked = Array.isArray(this.lastLandmarks) && this.lastLandmarks.length === 21;
+    const isOk = typeof quality === 'object' && quality !== null ? quality.ok : Boolean(quality);
+    const trackingEl = this.$('#snapshot-tracking-indicator');
+    if (trackingEl) {
+      if (isTracked && isOk) {
+        trackingEl.textContent = '● 손 추적 정상';
+        trackingEl.className = 'tracking-indicator ok';
+      } else {
+        trackingEl.textContent = isTracked ? '⚠️ 추적 품질 불안정' : '✕ 손 미감지';
+        trackingEl.className = 'tracking-indicator bad';
+      }
+    }
+  }
+
+  syncSnapshotStudioUI() {
+    const mode = this.controller?.pointerMode ?? 'trigger';
+    const stats = this.snapshotStudio.getStats();
+    const curAction = this.snapshotStudio.selectedGroundTruth;
+
+    // 1. Update Action selection buttons
+    this.root.querySelectorAll('#snapshot-actions-selector button')?.forEach(btn => {
+      const actId = btn.dataset.action;
+      const def = SUPPORTED_ACTIONS.find(a => a.id === actId);
+      const supported = def ? def.modes.includes(mode) : true;
+      btn.disabled = !supported;
+      btn.classList.toggle('active', actId === curAction);
+
+      const countEl = this.$(`#snap-count-${actId}`);
+      if (countEl) {
+        countEl.textContent = String(stats.byGroundTruth[actId] || 0);
+      }
+    });
+
+    // 2. Buttons enable/disable
+    const undoBtn = this.$('#btn-snapshot-undo');
+    if (undoBtn) undoBtn.disabled = stats.total === 0;
+
+    const dlBtn = this.$('#btn-snapshot-download');
+    if (dlBtn) dlBtn.disabled = stats.total === 0;
+
+    const clearBtn = this.$('#btn-snapshot-clear');
+    if (clearBtn) clearBtn.disabled = stats.total === 0;
+
+    // 3. Stats Summary pills
+    const totalEl = this.$('#snap-stat-total');
+    if (totalEl) totalEl.textContent = `총 ${stats.total}개 표본`;
+
+    const matchEl = this.$('#snap-stat-matches');
+    if (matchEl) matchEl.textContent = `일치(정상): ${stats.matches}`;
+
+    const discEl = this.$('#snap-stat-discrepancies');
+    if (discEl) discEl.textContent = `불일치(취약점): ${stats.discrepancies}`;
+
+    const modeEl = this.$('#snap-stat-mode');
+    if (modeEl) modeEl.textContent = `${mode.toUpperCase()} 모드`;
   }
 }

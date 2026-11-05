@@ -39,21 +39,6 @@
   <button id="overlay-exit-btn" type="button" class="hud-btn">🖥️ 설정으로 복귀 (Esc)</button>
   <button id="overlay-stop-btn" type="button" class="hud-btn danger">⏹️ 제어 중지</button>
 </div>
-
-<!-- Human-in-the-Loop Dataset Collection HUD Bar -->
-<div id="overlay-annotation-bar" class="hud-annotation-bar" title="수동 데이터 수집 & 라벨링 조작 바">
-  <div class="hud-ann-left">
-    <span class="hud-ann-badge-mode" id="hud-ann-mode">Trigger</span>
-    <span class="hud-ann-badge-target" id="hud-ann-target">🎯 1: move</span>
-    <span class="hud-ann-badge-status" id="hud-ann-status">대기 중 (Space)</span>
-    <span class="hud-ann-badge-trial" id="hud-ann-trial">Trial 0/10</span>
-  </div>
-  <div class="hud-ann-right">
-    <button id="hud-ann-toggle-btn" type="button" class="hud-ann-btn primary" title="동작 시작/종료 토글 (Space)">▶️ 동작 시작 (Space)</button>
-    <button id="hud-ann-cancel-btn" type="button" class="hud-ann-btn warning" disabled title="현재 Trial 취소 및 재입력 (Backspace)">↩️ 취소 (Backspace)</button>
-    <button id="hud-ann-next-btn" type="button" class="hud-ann-btn" title="다음 수집 동작으로 이동 (Tab)">⏭️ 다음 (Tab)</button>
-  </div>
-</div>
 <div id="overlay-pip-box"></div>
 
 <!-- Main App Setup View -->
@@ -132,74 +117,83 @@
         <p id="mouse-status" class="message" role="status">준비됐습니다. [에어 마우스 시작] 버튼을 누르세요.</p>
       </div>
 
-      <!-- Interactive Dataset Collection & Annotation Card -->
-      <div class="settings-card dataset-card">
+      <!-- Pose Snapshot Studio Card (Priority 1: Spatial Recognition Accuracy) -->
+      <div class="settings-card snapshot-studio-card">
         <div class="section-heading">
-          <h2>🎯 시계열 데이터 수집 & 라벨링 (Human-in-the-Loop)</h2>
-          <span id="dataset-session-badge" class="status-pill">녹화 대기 (F8)</span>
+          <h2>🎯 자세 표본 채집 스튜디오 (Pose Snapshot Studio)</h2>
+          <span id="snapshot-status-pill" class="status-pill on">표본 채집 대기</span>
         </div>
         <p class="dataset-subhead">
-          웹캠 앞에서 실제 손동작을 직접 수행하며 고품질 원본 시계열 학습 데이터(JSONL)를 수집합니다.
+          웹캠 앞에서 손 자세를 잡고 <strong>[Space]</strong>를 눌러 특정 각도의 단일 프레임 정답 표본을 수집합니다.<br>
+          <small style="color:var(--muted)">마우스 제어가 꺼진 상태에서 안전하게 인식 실패 사각지대(Corner Case)를 수집합니다.</small>
         </p>
 
-        <!-- Action Selector Pills -->
-        <div class="dataset-actions-grid" id="dataset-actions-selector">
-          <button type="button" class="action-pill-btn active" data-action="move" title="숫자키 1">
-            <span class="pill-key">1</span> 👆 move (이동) <span class="pill-count" id="count-move">0</span>
-          </button>
-          <button type="button" class="action-pill-btn" data-action="freeze" title="숫자키 2 (Trigger 전용)">
-            <span class="pill-key">2</span> 🔒 freeze (고정) <span class="pill-count" id="count-freeze">0</span>
-          </button>
-          <button type="button" class="action-pill-btn" data-action="left_click" title="숫자키 3">
-            <span class="pill-key">3</span> 👍 left_click (좌클릭) <span class="pill-count" id="count-left_click">0</span>
-          </button>
-          <button type="button" class="action-pill-btn" data-action="right_click" title="숫자키 4">
-            <span class="pill-key">4</span> 🤙 right_click (우클릭) <span class="pill-count" id="count-right_click">0</span>
-          </button>
-          <button type="button" class="action-pill-btn" data-action="scroll" title="숫자키 5">
-            <span class="pill-key">5</span> 🖐️ scroll (스크롤) <span class="pill-count" id="count-scroll">0</span>
-          </button>
-          <button type="button" class="action-pill-btn" data-action="idle" title="숫자키 6 또는 0">
-            <span class="pill-key">6</span> ✊ idle (중립/휴식) <span class="pill-count" id="count-idle">0</span>
-          </button>
-        </div>
-
-        <!-- Active Action Instructions & Live Trial Box -->
-        <div class="dataset-trial-box" id="dataset-trial-box">
-          <div class="trial-meta-row">
-            <strong id="trial-action-title">👆 1: move (포인터 이동)</strong>
-            <span id="trial-counter-badge" class="trial-counter-badge">Trial 0 / 10</span>
+        <!-- Live Judgment vs Ground Truth Comparison Box -->
+        <div class="snapshot-compare-box" id="snapshot-compare-box">
+          <div class="compare-row">
+            <div class="compare-col system">
+              <span class="compare-label">시스템 현재 판정 (Predicted)</span>
+              <span id="live-predicted-action" class="compare-badge system">idle</span>
+            </div>
+            <div class="compare-arrow">➔</div>
+            <div class="compare-col target">
+              <span class="compare-label">사용자 지정 정답 (Ground Truth)</span>
+              <span id="live-ground-truth-action" class="compare-badge target">👆 1: move</span>
+            </div>
           </div>
-          <p id="trial-instruction-text" class="trial-instruction-text">
-            손바닥을 안정적으로 유지하며 커서를 부드럽게 이동합니다.
-          </p>
-          <div class="trial-status-row">
-            <span id="trial-status-badge" class="trial-status-badge idle">대기 중 (Space를 눌러 동작 시작)</span>
-            <span id="trial-metrics" class="trial-metrics">0.0s · 0프레임</span>
+          <div class="compare-diagnosis-row">
+            <span id="compare-match-indicator" class="match-indicator match">✅ 시스템 판정과 사용자 정답이 일치합니다</span>
+            <span id="snapshot-tracking-indicator" class="tracking-indicator ok">● 손 추적 정상</span>
           </div>
         </div>
 
-        <!-- Annotation Controls Toolbar -->
-        <div class="dataset-controls-toolbar">
-          <button type="button" id="btn-trial-toggle" class="dataset-btn primary">
-            ▶️ 동작 시작 (Space)
+        <!-- Ground Truth Action Selector Pills -->
+        <div class="ground-truth-label-heading">
+          <strong>지정할 정답 자세 (숫자키 1~6 또는 클릭)</strong>
+        </div>
+        <div class="dataset-actions-grid" id="snapshot-actions-selector">
+          <button type="button" class="action-pill-btn active" data-action="move" title="단축키 1">
+            <span class="pill-key">1</span> 👆 move (이동) <span class="pill-count" id="snap-count-move">0</span>
           </button>
-          <button type="button" id="btn-trial-cancel" class="dataset-btn warning" disabled>
-            ↩️ 취소 / 재시도 (Backspace)
+          <button type="button" class="action-pill-btn" data-action="freeze" title="단축키 2 (Trigger 전용)">
+            <span class="pill-key">2</span> 🔒 freeze (고정) <span class="pill-count" id="snap-count-freeze">0</span>
           </button>
-          <button type="button" id="btn-trial-next" class="dataset-btn secondary">
-            ⏭️ 다음 동작 (Tab)
+          <button type="button" class="action-pill-btn" data-action="left_click" title="단축키 3">
+            <span class="pill-key">3</span> 👍 left_click (좌클릭) <span class="pill-count" id="snap-count-left_click">0</span>
           </button>
-          <button type="button" id="btn-dataset-record-toggle" class="dataset-btn record">
-            ⏺️ 세션 녹화 시작 (F8)
+          <button type="button" class="action-pill-btn" data-action="right_click" title="단축키 4">
+            <span class="pill-key">4</span> 🤙 right_click (우클릭) <span class="pill-count" id="snap-count-right_click">0</span>
+          </button>
+          <button type="button" class="action-pill-btn" data-action="scroll" title="단축키 5">
+            <span class="pill-key">5</span> 🖐️ scroll (스크롤) <span class="pill-count" id="snap-count-scroll">0</span>
+          </button>
+          <button type="button" class="action-pill-btn" data-action="idle" title="단축키 6 또는 0">
+            <span class="pill-key">6</span> ✊ idle (중립/휴식) <span class="pill-count" id="snap-count-idle">0</span>
           </button>
         </div>
 
-        <!-- Session Summary Stats Footer -->
-        <div class="dataset-summary-row" id="dataset-summary-row">
-          <span>세션 수집 현황: </span>
-          <span class="summary-pill" id="sum-total-trials">총 0회 Trial</span>
-          <span class="summary-pill" id="sum-active-mode">모드: Trigger</span>
+        <!-- Snapshot Action Toolbar -->
+        <div class="snapshot-controls-toolbar">
+          <button type="button" id="btn-snapshot-capture" class="dataset-btn primary capture-btn" title="현재 손 관절 좌표와 판정 결과를 캡처하여 표본으로 저장 (단축키: Space)">
+            📷 자세 표본 캡처 (Space)
+          </button>
+          <button type="button" id="btn-snapshot-undo" class="dataset-btn warning" disabled title="마지막으로 저장한 표본을 삭제 (단축키: Backspace)">
+            ↩️ 직전 표본 취소 (Backspace)
+          </button>
+          <button type="button" id="btn-snapshot-download" class="dataset-btn success" disabled title="수집된 표본 데이터셋을 JSON 파일로 다운로드">
+            💾 표본 저장 (.json)
+          </button>
+          <button type="button" id="btn-snapshot-clear" class="dataset-btn secondary" disabled title="모든 표본 비우기">
+            🗑️ 전체 비우기
+          </button>
+        </div>
+
+        <!-- Dataset Summary Stats -->
+        <div class="snapshot-summary-row" id="snapshot-summary-row">
+          <span class="summary-pill total" id="snap-stat-total">총 0개 표본</span>
+          <span class="summary-pill matches" id="snap-stat-matches">일치(정상): 0</span>
+          <span class="summary-pill discrepancies" id="snap-stat-discrepancies">불일치(취약점): 0</span>
+          <span class="summary-pill mode" id="snap-stat-mode">Trigger 모드</span>
         </div>
       </div>
 
