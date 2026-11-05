@@ -1,3 +1,4 @@
+import {RawTemporalRecorder} from './recorder/raw-temporal-recorder.js';
 import {AirMouseController} from './air-mouse-controller.js';
 
 const LANDMARK_NAMES = [
@@ -64,6 +65,7 @@ export class MouseWorkspace {
     };
 
     this.controller = createController();
+    this.recorder = new RawTemporalRecorder();
     this.active = true;
     this.ready = false;
     this.enabled = false;
@@ -171,6 +173,10 @@ export class MouseWorkspace {
     this.$('#btn-win-max')?.addEventListener('click', () => this.bridge?.maximize());
     this.$('#btn-win-close')?.addEventListener('click', () => this.bridge?.close());
 
+    this.$('#overlay-record-btn')?.addEventListener('click', () => {
+      this.toggleRecording();
+    });
+
     this.$('#overlay-dump-btn')?.addEventListener('click', () => {
       this.triggerDebugDump();
     });
@@ -179,6 +185,9 @@ export class MouseWorkspace {
       if (event.key === 'F4') {
         event.preventDefault();
         this.triggerDebugDump();
+      } else if (event.key === 'F8') {
+        event.preventDefault();
+        this.toggleRecording();
       } else if (event.key === 'F11') {
         event.preventDefault();
         void this.toggleOverlay(!this.overlayActive);
@@ -539,6 +548,18 @@ export class MouseWorkspace {
       this.lastGates = state.gates;
     }
 
+    // Raw Temporal Recording (Zero overhead when not active)
+    if (this.recorder?.recording) {
+      this.recorder.recordFrame({
+        timestamp: now,
+        landmarks,
+        quality,
+        mode: this.controller?.pointerMode ?? 'trigger',
+        geometryState: state,
+        events: state?.events,
+      });
+    }
+
     if (this.enabled) {
       this.lastFrame = performance.now();
       if (!this.paused) {
@@ -850,5 +871,37 @@ export class MouseWorkspace {
     this._toastTimer = setTimeout(() => {
       toast.classList.remove('show');
     }, 2500);
+  }
+  startRecording() {
+    const mode = this.controller?.pointerMode ?? 'trigger';
+    const width = this.lastDimensions?.width || 640;
+    const height = this.lastDimensions?.height || 480;
+    const session = this.recorder.start({ mode, width, height });
+    this.updateRecorderUI(true);
+    this.showToast(`⏺️ 녹화 시작 (세션: ${session.sessionId.slice(-10)})`);
+  }
+
+  stopRecording() {
+    if (!this.recorder?.recording) return;
+    const result = this.recorder.stop();
+    this.updateRecorderUI(false);
+    this.showToast(`⏹️ 녹화 종료 (${result.totalFrames} 프레임 저장됨)`);
+    this.recorder.downloadJSONL();
+  }
+
+  toggleRecording() {
+    if (this.recorder?.recording) {
+      this.stopRecording();
+    } else {
+      this.startRecording();
+    }
+  }
+
+  updateRecorderUI(isRecording) {
+    const btn = this.$('#overlay-record-btn');
+    if (btn) {
+      btn.textContent = isRecording ? '⏹️ 녹화 중지 (F8)' : '⏺️ 녹화 시작 (F8)';
+      btn.classList.toggle('recording-active', isRecording);
+    }
   }
 }

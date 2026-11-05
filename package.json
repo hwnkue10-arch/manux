@@ -8,7 +8,7 @@
     "start": "node server.js",
     "desktop": "electron desktop/main.mjs",
     "setup": "node scripts/setup.mjs",
-    "test": "node -e \"['src/air-mouse-controller.js', 'src/mouse-workspace.js', 'src/app.js', 'desktop/main.mjs'].forEach(f => require('child_process').execSync('node --check ' + f))\" && node --test tests/air-mouse-controller.test.js tests/desktop-mouse.test.js",
+    "test": "node -e \"['src/air-mouse-controller.js', 'src/mouse-workspace.js', 'src/app.js', 'desktop/main.mjs', 'src/recorder/raw-temporal-recorder.js'].forEach(f => require('child_process').execSync('node --check ' + f))\" && node --test tests/air-mouse-controller.test.js tests/desktop-mouse.test.js tests/raw-temporal-recorder.test.js",
     "test:native": "node scripts/test-desktop-mouse.mjs"
   },
   "dependencies": {
