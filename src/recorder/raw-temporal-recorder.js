@@ -29,6 +29,8 @@ export class RawTemporalRecorder {
     this.buffer = [];
     this.metadata = null;
     this.summary = null;
+    this.currentAnnotation = null;
+    this.annotations = [];
   }
 
   /**
@@ -46,6 +48,8 @@ export class RawTemporalRecorder {
     this.droppedCount = 0;
     this.buffer = [];
     this.summary = null;
+    this.currentAnnotation = null;
+    this.annotations = [];
 
     this.metadata = {
       sessionId: this.sessionId,
@@ -68,13 +72,15 @@ export class RawTemporalRecorder {
     timestamp = performance.now(),
     landmarks = null,
     quality = true,
-    mode = 'trigger',
+    mode = null,
     geometryState = null,
     controllerEvents = null,
     dispatch = null,
     actionIntent = null,
   } = {}) {
     if (!this.recording) return null;
+
+    const effectiveMode = mode || this.metadata?.mode || 'trigger';
 
     // Exact empirical dt calculation from prior recorded frame
     const numTimestamp = Number.isFinite(timestamp) ? timestamp : performance.now();
@@ -140,13 +146,17 @@ export class RawTemporalRecorder {
       ? controllerEvents.map(ev => ({ ...ev }))
       : [];
 
+    const effectiveActionIntent = (actionIntent !== null && actionIntent !== undefined)
+      ? actionIntent
+      : (this.currentAnnotation ? this.currentAnnotation.actionIntent : null);
+
     const record = {
       type: 'frame',
       sessionId: this.sessionId,
       frameId: ++this.frameCount,
       timestamp: Number(numTimestamp.toFixed(2)),
       dt,
-      mode,
+      mode: effectiveMode,
       tracking: {
         tracked: handTracked,
         quality: qualityRecord,
@@ -155,7 +165,7 @@ export class RawTemporalRecorder {
       geometryState: geom,
       controllerEvents: reqEvents,
       dispatch: dispatch ? { ...dispatch } : null,
-      actionIntent: actionIntent || null,
+      actionIntent: effectiveActionIntent,
     };
 
     // Push the frame FIRST to preserve the N-th boundary frame!
@@ -186,14 +196,167 @@ export class RawTemporalRecorder {
   }
 
   /**
+   * Start a human-in-the-loop manual action annotation interval.
+   * Monotonically timestamps the start and pushes an annotation_start event to the stream.
+   * Subsequent recorded frames will carry this actionIntent until ended or cancelled.
+   */
+  startAnnotation({ actionIntent, trialId = null, metadata = {} } = {}) {
+    if (!this.recording) return null;
+    if (!actionIntent || typeof actionIntent !== 'string') {
+      throw new Error('[RawTemporalRecorder] Valid actionIntent string is required');
+    }
+
+    // Auto-close previous annotation if still active
+    if (this.currentAnnotation) {
+      this.endAnnotation({ autoClosed: true });
+    }
+
+    const startTimestamp = performance.now();
+    const mode = this.metadata?.mode || 'trigger';
+    const trial = Number.isFinite(trialId) ? trialId : null;
+    const rand = Math.random().toString(36).slice(2, 6);
+    const annotationId = `ann_${mode}_${actionIntent}_t${trial ?? Date.now()}_${rand}`;
+
+    this.currentAnnotation = {
+      annotationId,
+      sessionId: this.sessionId,
+      mode,
+      actionIntent,
+      trialId: trial,
+      startTimestamp: Number(startTimestamp.toFixed(2)),
+      startFrameId: this.frameCount + 1,
+      labelSource: 'manual',
+      metadata: { ...metadata },
+    };
+
+    const startEvent = {
+      type: 'annotation_start',
+      annotationId,
+      sessionId: this.sessionId,
+      mode,
+      actionIntent,
+      trialId: trial,
+      startTimestamp: Number(startTimestamp.toFixed(2)),
+      startFrameId: this.currentAnnotation.startFrameId,
+      labelSource: 'manual',
+      metadata: { ...metadata },
+    };
+
+    this.buffer.push(startEvent);
+    return startEvent;
+  }
+
+  /**
+   * End the current action annotation interval.
+   * Monotonically timestamps the end and pushes an annotation_end event to the stream.
+   */
+  endAnnotation({ metadata = {}, ...rest } = {}) {
+    if (!this.recording || !this.currentAnnotation) return null;
+
+    const endTimestamp = performance.now();
+    const ann = this.currentAnnotation;
+    const durationMs = Number(Math.max(0, endTimestamp - ann.startTimestamp).toFixed(2));
+    const endFrameId = this.frameCount;
+    const frameCount = Math.max(0, endFrameId - ann.startFrameId + 1);
+
+    const mergedMetadata = { ...ann.metadata, ...metadata, ...rest };
+
+    const endEvent = {
+      type: 'annotation_end',
+      annotationId: ann.annotationId,
+      sessionId: this.sessionId,
+      mode: ann.mode,
+      actionIntent: ann.actionIntent,
+      trialId: ann.trialId,
+      startTimestamp: ann.startTimestamp,
+      endTimestamp: Number(endTimestamp.toFixed(2)),
+      durationMs,
+      startFrameId: ann.startFrameId,
+      endFrameId,
+      frameCount,
+      labelSource: 'manual',
+      metadata: mergedMetadata,
+    };
+
+    this.buffer.push(endEvent);
+    this.annotations.push(endEvent);
+    this.currentAnnotation = null;
+    return endEvent;
+  }
+
+  /**
+   * Cancel / abort the current action annotation interval (e.g. human mistake during trial).
+   * Reverts actionIntent to null on any frames recorded during this trial,
+   * emits an annotation_cancel event, and clears currentAnnotation.
+   */
+  cancelAnnotation({ reason = 'manual_cancel' } = {}) {
+    if (!this.recording || !this.currentAnnotation) return null;
+
+    const ann = this.currentAnnotation;
+    const cancelledAt = performance.now();
+
+    // Revert actionIntent on any frames recorded during this aborted trial
+    for (let i = this.buffer.length - 1; i >= 0; i--) {
+      const item = this.buffer[i];
+      if (item.type === 'frame' && item.frameId >= ann.startFrameId) {
+        item.actionIntent = null;
+      } else if (item.type === 'annotation_start' && item.annotationId === ann.annotationId) {
+        break;
+      }
+    }
+
+    const cancelEvent = {
+      type: 'annotation_cancel',
+      annotationId: ann.annotationId,
+      sessionId: this.sessionId,
+      mode: ann.mode,
+      actionIntent: ann.actionIntent,
+      trialId: ann.trialId,
+      startTimestamp: ann.startTimestamp,
+      cancelledAt: Number(cancelledAt.toFixed(2)),
+      reason,
+      labelSource: 'manual',
+    };
+
+    this.buffer.push(cancelEvent);
+    this.currentAnnotation = null;
+    return cancelEvent;
+  }
+
+  /**
+   * Get the active in-progress annotation object or null.
+   */
+  getCurrentAnnotation() {
+    return this.currentAnnotation;
+  }
+
+  /**
+   * Get list of all completed annotation intervals recorded in this session.
+   */
+  getAnnotations() {
+    return [...this.annotations];
+  }
+
+  /**
    * Stop recording and finalize session metadata. Buffer is never cleared.
    */
   stop() {
-    if (!this.recording) return this.summary ? { sessionId: this.sessionId, metadata: this.metadata, summary: this.summary, totalFrames: this.frameCount, frames: this.buffer } : null;
+    if (!this.recording) return this.summary ? { sessionId: this.sessionId, metadata: this.metadata, summary: this.summary, totalFrames: this.frameCount, frames: this.buffer, annotations: this.annotations } : null;
+
+    // Auto-close active annotation if one was running when stop was pressed
+    if (this.currentAnnotation) {
+      this.endAnnotation({ autoClosed: true });
+    }
 
     this.recording = false;
     const endedAt = new Date().toISOString();
     const durationMs = this.startTime !== null ? performance.now() - this.startTime : 0;
+
+    // Calculate annotation statistics breakdown
+    const annotationsSummary = {};
+    for (const ann of this.annotations) {
+      annotationsSummary[ann.actionIntent] = (annotationsSummary[ann.actionIntent] || 0) + 1;
+    }
 
     this.summary = {
       sessionId: this.sessionId,
@@ -205,14 +368,18 @@ export class RawTemporalRecorder {
       droppedFrames: this.droppedCount,
       trackingRatio: this.frameCount > 0 ? Number((this.trackedCount / this.frameCount).toFixed(4)) : 0,
       mode: this.metadata?.mode,
+      totalAnnotations: this.annotations.length,
+      annotationsSummary,
     };
 
     return {
       sessionId: this.sessionId,
+      mode: this.metadata?.mode,
       metadata: this.metadata,
       summary: this.summary,
       totalFrames: this.frameCount,
       frames: this.buffer,
+      annotations: this.annotations,
     };
   }
 
@@ -225,14 +392,23 @@ export class RawTemporalRecorder {
     // Header record
     lines.push(JSON.stringify({
       type: 'header',
-      version: '1.0.0',
+      version: '1.1.0',
       sessionId: this.sessionId,
       metadata: this.metadata,
     }));
 
-    // Data frame records
+    // Data frame and annotation records in chronological order
     for (let i = 0; i < this.buffer.length; i++) {
       lines.push(JSON.stringify(this.buffer[i]));
+    }
+
+    // Dynamic annotations breakdown if summary was not already finalized
+    let annSummary = this.summary?.annotationsSummary;
+    if (!annSummary) {
+      annSummary = {};
+      for (const ann of this.annotations) {
+        annSummary[ann.actionIntent] = (annSummary[ann.actionIntent] || 0) + 1;
+      }
     }
 
     // Summary record
@@ -244,6 +420,9 @@ export class RawTemporalRecorder {
       trackedFrames: this.trackedCount,
       droppedFrames: this.droppedCount,
       trackingRatio: this.frameCount > 0 ? Number((this.trackedCount / this.frameCount).toFixed(4)) : 0,
+      mode: this.metadata?.mode,
+      totalAnnotations: this.summary?.totalAnnotations ?? this.annotations.length,
+      annotationsSummary: annSummary,
     }));
 
     return lines.join('\n') + '\n';

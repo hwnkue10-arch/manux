@@ -10,6 +10,15 @@ const LANDMARK_NAMES = [
   'PINKY_MCP', 'PINKY_PIP', 'PINKY_DIP', 'PINKY_TIP'
 ];
 
+export const DATASET_ACTIONS = [
+  { id: 'move', key: '1', label: 'move (포인터 이동)', icon: '👆', desc: '손바닥을 안정적으로 유지하며 커서를 부드럽게 이동합니다.', modes: ['trigger', 'index'] },
+  { id: 'freeze', key: '2', label: 'freeze (포인터 고정)', icon: '🔒', desc: 'Trigger 모드 전용: 검지를 접어 커서를 고정합니다. (Index 모드 미지원)', modes: ['trigger'] },
+  { id: 'left_click', key: '3', label: 'left_click (좌클릭)', icon: '👍', desc: 'Trigger 모드: 엄지를 펴서 좌클릭 수행 / Index 모드: 엄지-검지 핀치', modes: ['trigger', 'index'] },
+  { id: 'right_click', key: '4', label: 'right_click (우클릭)', icon: '🤙', desc: 'Trigger 모드: 새끼손가락을 펴서 우클릭 / Index 모드: 엄지-약지 터치', modes: ['trigger', 'index'] },
+  { id: 'scroll', key: '5', label: 'scroll (스크롤)', icon: '🖐️', desc: 'Trigger 모드: 손바닥(🖐️) 또는 V자(✌️) 상하 이동 / Index 모드: 스와이프', modes: ['trigger', 'index'] },
+  { id: 'idle', key: '6', label: 'idle (중립/휴식)', icon: '✊', desc: '마우스 제어 동작을 하지 않는 편안한 휴식/주먹 자세를 유지합니다.', modes: ['trigger', 'index'] },
+];
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 export class MouseWorkspace {
@@ -66,6 +75,9 @@ export class MouseWorkspace {
 
     this.controller = createController();
     this.recorder = new RawTemporalRecorder();
+    this.selectedAction = 'move';
+    this.trialCounts = { move: 0, freeze: 0, left_click: 0, right_click: 0, scroll: 0, idle: 0 };
+    this.targetTrials = 10;
     this.active = true;
     this.ready = false;
     this.enabled = false;
@@ -109,6 +121,11 @@ export class MouseWorkspace {
       this.stop('추적 방식을 변경했습니다.');
       this.controller = createController();
       this.updateGuideCards();
+      const newMode = this.controller?.pointerMode ?? 'trigger';
+      if (newMode === 'index' && this.selectedAction === 'freeze') {
+        this.selectedAction = 'move';
+      }
+      this.syncDatasetUI();
     });
 
     const updateSettings = (msg) => {
@@ -181,7 +198,54 @@ export class MouseWorkspace {
       this.triggerDebugDump();
     });
 
+    // Dataset Collection Action selection pills
+    this.root.querySelectorAll('#dataset-actions-selector button')?.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.action;
+        if (action) this.selectAction(action);
+      });
+    });
+
+    this.$('#btn-trial-toggle')?.addEventListener('click', () => {
+      this.toggleActionAnnotation();
+    });
+
+    this.$('#btn-trial-cancel')?.addEventListener('click', () => {
+      this.cancelActionAnnotation();
+    });
+
+    this.$('#btn-trial-next')?.addEventListener('click', () => {
+      this.nextAction();
+    });
+
+    this.$('#btn-dataset-record-toggle')?.addEventListener('click', () => {
+      this.toggleRecording();
+    });
+
+    this.$('#hud-ann-toggle-btn')?.addEventListener('click', () => {
+      this.toggleActionAnnotation();
+    });
+
+    this.$('#hud-ann-cancel-btn')?.addEventListener('click', () => {
+      this.cancelActionAnnotation();
+    });
+
+    this.$('#hud-ann-next-btn')?.addEventListener('click', () => {
+      this.nextAction();
+    });
+
+    const hudAnnBar = this.$('#overlay-annotation-bar');
+    hudAnnBar?.addEventListener('mouseenter', () => {
+      if (this.overlayActive && this.bridge) this.bridge.setIgnoreMouse(false);
+    });
+    hudAnnBar?.addEventListener('mouseleave', () => {
+      if (this.overlayActive && this.bridge) this.bridge.setIgnoreMouse(true);
+    });
+
     window.addEventListener('keydown', event => {
+      const isInput = event.target && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.isContentEditable);
+      if (isInput) return;
+
       if (event.key === 'F4') {
         event.preventDefault();
         this.triggerDebugDump();
@@ -194,6 +258,29 @@ export class MouseWorkspace {
       } else if (event.key === 'Escape' && this.overlayActive) {
         event.preventDefault();
         void this.toggleOverlay(false);
+      } else if (event.code === 'Space') {
+        event.preventDefault();
+        this.toggleActionAnnotation();
+      } else if (event.key === 'Backspace') {
+        if (this.recorder?.getCurrentAnnotation() || (this.trialCounts[this.selectedAction] || 0) > 0) {
+          event.preventDefault();
+          this.cancelActionAnnotation();
+        }
+      } else if (event.key === 'Tab') {
+        event.preventDefault();
+        this.nextAction();
+      } else if (event.key === '1') {
+        this.selectAction('move');
+      } else if (event.key === '2') {
+        this.selectAction('freeze');
+      } else if (event.key === '3') {
+        this.selectAction('left_click');
+      } else if (event.key === '4') {
+        this.selectAction('right_click');
+      } else if (event.key === '5') {
+        this.selectAction('scroll');
+      } else if (event.key === '6' || event.key === '0') {
+        this.selectAction('idle');
       }
     });
 
@@ -223,6 +310,7 @@ export class MouseWorkspace {
     this.updateGuideCards();
     this.renderTarget();
     this.refresh();
+    this.syncDatasetUI();
   }
 
   initInteractiveZone() {
@@ -568,7 +656,19 @@ export class MouseWorkspace {
       // Handle automatic stop upon reaching maxFrames limit
       if (wasRecording && !this.recorder.recording) {
         this.updateRecorderUI(false);
+        this.syncDatasetUI();
         this.showToast(`⏹️ 최대 녹화 한도(${this.recorder.maxFrames}프레임) 도달로 자동 저장되었습니다.`);
+      }
+
+      // Live metrics update for active trial
+      const activeAnn = this.recorder.getCurrentAnnotation();
+      if (activeAnn) {
+        const metricsEl = this.$('#trial-metrics');
+        if (metricsEl) {
+          const elapsedSec = ((now - activeAnn.startTimestamp) / 1000).toFixed(1);
+          const fCount = Math.max(0, this.recorder.frameCount - activeAnn.startFrameId + 1);
+          metricsEl.textContent = `${elapsedSec}s · ${fCount}프레임`;
+        }
       }
     }
 
@@ -884,12 +984,232 @@ export class MouseWorkspace {
       toast.classList.remove('show');
     }, 2500);
   }
+  selectAction(actionId) {
+    const mode = this.controller?.pointerMode ?? 'trigger';
+    const def = DATASET_ACTIONS.find(a => a.id === actionId);
+    if (!def) return false;
+
+    if (!def.modes.includes(mode)) {
+      this.showToast(`⚠️ ${mode.toUpperCase()} 모드에서는 ${def.label} 동작을 지원하지 않습니다.`);
+      return false;
+    }
+
+    if (this.recorder?.getCurrentAnnotation()) {
+      this.showToast('⚠️ 현재 진행 중인 동작을 먼저 완료(Space)하거나 취소(Backspace)하세요.');
+      return false;
+    }
+
+    this.selectedAction = actionId;
+    this.syncDatasetUI();
+    this.showToast(`🎯 수집 동작 선택: ${def.label}`);
+    return true;
+  }
+
+  toggleActionAnnotation() {
+    if (!this.recorder?.recording) {
+      this.startRecording();
+    }
+
+    if (this.recorder?.getCurrentAnnotation()) {
+      const endEv = this.recorder.endAnnotation();
+      if (endEv) {
+        this.trialCounts[this.selectedAction] = (this.trialCounts[this.selectedAction] || 0) + 1;
+        const cur = this.trialCounts[this.selectedAction];
+        this.showToast(`✅ [${this.selectedAction}] Trial ${cur} 완료 (${(endEv.durationMs / 1000).toFixed(1)}s, ${endEv.frameCount}프레임)`);
+      }
+      this.syncDatasetUI();
+    } else {
+      const mode = this.controller?.pointerMode ?? 'trigger';
+      const def = DATASET_ACTIONS.find(a => a.id === this.selectedAction);
+      if (def && !def.modes.includes(mode)) {
+        this.showToast(`⚠️ ${mode.toUpperCase()} 모드에서는 ${def.label} 동작을 지원하지 않습니다.`);
+        return;
+      }
+      const nextTrialId = (this.trialCounts[this.selectedAction] || 0) + 1;
+      const startEv = this.recorder.startAnnotation({ actionIntent: this.selectedAction, trialId: nextTrialId });
+      if (startEv) {
+        this.showToast(`🔴 [${this.selectedAction}] Trial ${nextTrialId} 시작! (완료 시 Space)`);
+      }
+      this.syncDatasetUI();
+    }
+  }
+
+  cancelActionAnnotation() {
+    if (this.recorder?.getCurrentAnnotation()) {
+      const cancelEv = this.recorder.cancelAnnotation({ reason: 'manual_cancel' });
+      if (cancelEv) {
+        this.showToast(`↩️ [${this.selectedAction}] Trial ${cancelEv.trialId} 취소됨 (재시도하세요)`);
+      }
+      this.syncDatasetUI();
+    } else if ((this.trialCounts[this.selectedAction] || 0) > 0) {
+      this.trialCounts[this.selectedAction]--;
+      this.showToast(`↩️ [${this.selectedAction}] 직전 Trial 카운트 취소됨 (현재 ${this.trialCounts[this.selectedAction]}회)`);
+      this.syncDatasetUI();
+    }
+  }
+
+  nextAction() {
+    const mode = this.controller?.pointerMode ?? 'trigger';
+    const supported = DATASET_ACTIONS.filter(a => a.modes.includes(mode));
+    if (supported.length === 0) return;
+
+    if (this.recorder?.getCurrentAnnotation()) {
+      this.showToast('⚠️ 진행 중인 동작을 먼저 완료(Space)하거나 취소(Backspace)하세요.');
+      return;
+    }
+
+    const curIdx = supported.findIndex(a => a.id === this.selectedAction);
+    const nextIdx = (curIdx + 1) % supported.length;
+    this.selectAction(supported[nextIdx].id);
+  }
+
+  syncDatasetUI() {
+    const mode = this.controller?.pointerMode ?? 'trigger';
+    const isRecording = Boolean(this.recorder?.recording);
+    const activeAnn = this.recorder?.getCurrentAnnotation?.() || null;
+    const isPerforming = Boolean(activeAnn);
+
+    // 1. Session badge & record button
+    const sessionBadge = this.$('#dataset-session-badge');
+    if (sessionBadge) {
+      sessionBadge.textContent = isRecording ? '⏺️ 녹화 중 (F8로 저장)' : '녹화 대기 (F8)';
+      sessionBadge.className = `status-pill ${isRecording ? 'on' : ''}`;
+    }
+
+    const recBtn = this.$('#btn-dataset-record-toggle');
+    if (recBtn) {
+      recBtn.textContent = isRecording ? '⏹️ 세션 저장 (F8)' : '⏺️ 세션 녹화 시작 (F8)';
+      recBtn.classList.toggle('recording-active', isRecording);
+    }
+
+    // 2. Action selector pills
+    const actionDef = DATASET_ACTIONS.find(a => a.id === this.selectedAction) || DATASET_ACTIONS[0];
+    const pills = this.root.querySelectorAll('#dataset-actions-selector button');
+    pills?.forEach(pill => {
+      const actId = pill.dataset.action;
+      const def = DATASET_ACTIONS.find(a => a.id === actId);
+      const supported = def ? def.modes.includes(mode) : true;
+      pill.disabled = !supported;
+      pill.classList.toggle('active', actId === this.selectedAction);
+
+      const countEl = this.$(`#count-${actId}`);
+      if (countEl) {
+        countEl.textContent = String(this.trialCounts[actId] || 0);
+      }
+    });
+
+    // 3. Main Dashboard Trial Box
+    const titleEl = this.$('#trial-action-title');
+    if (titleEl) {
+      titleEl.textContent = `${actionDef.icon} ${actionDef.key}: ${actionDef.label}`;
+    }
+
+    const counterBadge = this.$('#trial-counter-badge');
+    const curCount = this.trialCounts[this.selectedAction] || 0;
+    if (counterBadge) {
+      counterBadge.textContent = `Trial ${curCount} / ${this.targetTrials}`;
+    }
+
+    const instrEl = this.$('#trial-instruction-text');
+    if (instrEl) {
+      instrEl.textContent = actionDef.desc;
+    }
+
+    const statusBadge = this.$('#trial-status-badge');
+    const trialBox = this.$('#dataset-trial-box');
+    if (statusBadge) {
+      if (isPerforming) {
+        statusBadge.textContent = `🔴 동작 수행 중 (완료 시 Space)`;
+        statusBadge.className = 'trial-status-badge performing';
+        trialBox?.classList.add('recording-trial');
+      } else {
+        statusBadge.textContent = isRecording
+          ? `대기 중 (Space를 눌러 동작 시작)`
+          : `녹화 전 (F8 또는 녹화 시작을 누르세요)`;
+        statusBadge.className = 'trial-status-badge idle';
+        trialBox?.classList.remove('recording-trial');
+      }
+    }
+
+    // 4. Main Dashboard Controls
+    const toggleBtn = this.$('#btn-trial-toggle');
+    if (toggleBtn) {
+      if (isPerforming) {
+        toggleBtn.textContent = '⏹️ 동작 완료 (Space)';
+        toggleBtn.classList.add('active-performing');
+      } else {
+        toggleBtn.textContent = '▶️ 동작 시작 (Space)';
+        toggleBtn.classList.remove('active-performing');
+      }
+    }
+
+    const cancelBtn = this.$('#btn-trial-cancel');
+    if (cancelBtn) {
+      cancelBtn.disabled = !isPerforming && curCount === 0;
+      cancelBtn.textContent = isPerforming ? '↩️ 취소 / 재시도 (Backspace)' : '↩️ 직전 Trial 취소 (Backspace)';
+    }
+
+    // 5. HUD Overlay Bar Elements
+    const hudMode = this.$('#hud-ann-mode');
+    if (hudMode) hudMode.textContent = mode.toUpperCase();
+
+    const hudTarget = this.$('#hud-ann-target');
+    if (hudTarget) hudTarget.textContent = `🎯 ${actionDef.key}: ${actionDef.id}`;
+
+    const hudStatus = this.$('#hud-ann-status');
+    if (hudStatus) {
+      if (isPerforming) {
+        hudStatus.textContent = '🔴 수행 중 (Space 완료)';
+        hudStatus.classList.add('active');
+      } else {
+        hudStatus.textContent = isRecording ? '대기 중 (Space 시작)' : '녹화 대기 (F8)';
+        hudStatus.classList.remove('active');
+      }
+    }
+
+    const hudTrial = this.$('#hud-ann-trial');
+    if (hudTrial) {
+      hudTrial.textContent = `Trial ${curCount}/${this.targetTrials}`;
+    }
+
+    const hudToggleBtn = this.$('#hud-ann-toggle-btn');
+    if (hudToggleBtn) {
+      if (isPerforming) {
+        hudToggleBtn.textContent = '⏹️ 완료 (Space)';
+        hudToggleBtn.classList.add('active-performing');
+      } else {
+        hudToggleBtn.textContent = '▶️ 시작 (Space)';
+        hudToggleBtn.classList.remove('active-performing');
+      }
+    }
+
+    const hudCancelBtn = this.$('#hud-ann-cancel-btn');
+    if (hudCancelBtn) {
+      hudCancelBtn.disabled = !isPerforming && curCount === 0;
+    }
+
+    // 6. Summary Row
+    const sumTrials = this.$('#sum-total-trials');
+    if (sumTrials) {
+      let total = 0;
+      for (const k of Object.keys(this.trialCounts)) total += this.trialCounts[k] || 0;
+      sumTrials.textContent = `총 ${total}회 Trial`;
+    }
+
+    const sumMode = this.$('#sum-active-mode');
+    if (sumMode) {
+      sumMode.textContent = `모드: ${mode === 'trigger' ? 'Trigger (조준·트리거)' : 'Index (직접 터치)'}`;
+    }
+  }
+
   startRecording() {
     const mode = this.controller?.pointerMode ?? 'trigger';
     const width = this.lastDimensions?.width || 640;
     const height = this.lastDimensions?.height || 480;
     const session = this.recorder.start({ mode, width, height });
+    this.trialCounts = { move: 0, freeze: 0, left_click: 0, right_click: 0, scroll: 0, idle: 0 };
     this.updateRecorderUI(true);
+    this.syncDatasetUI();
     this.showToast(`⏺️ 녹화 시작 (세션: ${session.sessionId.slice(-10)})`);
   }
 
@@ -897,7 +1217,9 @@ export class MouseWorkspace {
     if (!this.recorder?.recording) return;
     const result = this.recorder.stop();
     this.updateRecorderUI(false);
-    this.showToast(`⏹️ 녹화 종료 (${result.totalFrames} 프레임 저장됨)`);
+    this.syncDatasetUI();
+    const annCount = result.summary?.totalAnnotations || 0;
+    this.showToast(`⏹️ 녹화 종료 (${result.totalFrames} 프레임 · ${annCount}개 Trial 저장됨)`);
     this.recorder.downloadJSONL();
   }
 
@@ -914,6 +1236,16 @@ export class MouseWorkspace {
     if (btn) {
       btn.textContent = isRecording ? '⏹️ 녹화 중지 (F8)' : '⏺️ 녹화 시작 (F8)';
       btn.classList.toggle('recording-active', isRecording);
+    }
+    const recBtn = this.$('#btn-dataset-record-toggle');
+    if (recBtn) {
+      recBtn.textContent = isRecording ? '⏹️ 세션 저장 (F8)' : '⏺️ 세션 녹화 시작 (F8)';
+      recBtn.classList.toggle('recording-active', isRecording);
+    }
+    const sessionBadge = this.$('#dataset-session-badge');
+    if (sessionBadge) {
+      sessionBadge.textContent = isRecording ? '⏺️ 녹화 중 (F8로 저장)' : '녹화 대기 (F8)';
+      sessionBadge.className = `status-pill ${isRecording ? 'on' : ''}`;
     }
   }
 }

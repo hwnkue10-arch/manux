@@ -895,3 +895,363 @@ body.overlay-mode.show-pip #overlay-pip-box {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.7; transform: scale(0.97); }
 }
+
+/* ============================================================
+   ManuX Human-in-the-Loop Dataset Collection & Annotation UI
+   ============================================================ */
+
+/* HUD Annotation Floating Bar */
+.hud-annotation-bar {
+  display: none;
+  position: fixed;
+  top: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 999998;
+  background: rgba(15, 28, 40, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(70, 229, 189, 0.35);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
+  border-radius: 100px;
+  padding: 5px 14px;
+  align-items: center;
+  gap: 12px;
+  color: #fff;
+  pointer-events: auto;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+body.overlay-mode .hud-annotation-bar {
+  display: flex;
+}
+
+.hud-ann-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-ann-badge-mode {
+  background: rgba(70, 229, 189, 0.15);
+  border: 1px solid rgba(70, 229, 189, 0.5);
+  color: #46e5bd;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+}
+
+.hud-ann-badge-target {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.hud-ann-badge-status {
+  font-size: 12px;
+  color: #94a3b8;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.hud-ann-badge-status.active {
+  color: #fef08a;
+  background: rgba(234, 179, 8, 0.25);
+  border: 1px solid rgba(234, 179, 8, 0.6);
+  animation: recPulse 1.2s infinite ease-in-out;
+}
+
+.hud-ann-badge-trial {
+  font-size: 12px;
+  font-weight: 600;
+  color: #38bdf8;
+}
+
+.hud-ann-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hud-ann-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.hud-ann-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.hud-ann-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.hud-ann-btn.primary {
+  background: rgba(70, 229, 189, 0.25);
+  border-color: #46e5bd;
+  color: #46e5bd;
+}
+
+.hud-ann-btn.primary.active-performing {
+  background: rgba(239, 68, 68, 0.45);
+  border-color: #ef4444;
+  color: #fff;
+  animation: recPulse 1.2s infinite ease-in-out;
+}
+
+.hud-ann-btn.warning {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.5);
+  color: #fbbf24;
+}
+
+/* Main Dashboard Dataset Card */
+.dataset-card {
+  margin-top: 20px;
+}
+
+.dataset-subhead {
+  font-size: 13px;
+  color: var(--muted);
+  margin: -4px 0 14px;
+  line-height: 1.45;
+}
+
+.dataset-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.action-pill-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #f1f5f3;
+  border: 1px solid #d4dfd8;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #273831;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.action-pill-btn:hover:not(:disabled) {
+  border-color: #10b981;
+  background: #e6f7ef;
+}
+
+.action-pill-btn.active {
+  background: #0f3529;
+  border-color: #10b981;
+  color: #46e5bd;
+  box-shadow: 0 0 0 1px #10b981;
+}
+
+.action-pill-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #f8faf9;
+  border-color: #e2e8f0;
+}
+
+.action-pill-btn .pill-key {
+  display: inline-block;
+  background: rgba(0, 0, 0, 0.1);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  margin-right: 4px;
+  color: inherit;
+}
+
+.action-pill-btn.active .pill-key {
+  background: rgba(70, 229, 189, 0.25);
+  color: #46e5bd;
+}
+
+.action-pill-btn .pill-count {
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.action-pill-btn.active .pill-count {
+  background: #10b981;
+  color: #fff;
+}
+
+.dataset-trial-box {
+  background: #f8faf9;
+  border: 1px solid #d4dfd8;
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+
+.dataset-trial-box.recording-trial {
+  border-color: #ef4444;
+  background: #fff5f5;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
+}
+
+.trial-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.trial-meta-row strong {
+  font-size: 14px;
+  color: #1a2f26;
+}
+
+.trial-counter-badge {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f766e;
+  background: #ccfbf1;
+  padding: 3px 9px;
+  border-radius: 12px;
+}
+
+.trial-instruction-text {
+  font-size: 13px;
+  color: #374151;
+  margin: 0 0 10px;
+  line-height: 1.45;
+}
+
+.trial-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.trial-status-badge {
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.trial-status-badge.idle {
+  color: #64748b;
+  background: #e2e8f0;
+}
+
+.trial-status-badge.performing {
+  color: #991b1b;
+  background: #fee2e2;
+  border: 1px solid #f87171;
+  animation: recPulse 1.2s infinite ease-in-out;
+}
+
+.trial-metrics {
+  color: #64748b;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.dataset-controls-toolbar {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.dataset-btn {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid #cbd9d0;
+  background: #fff;
+  color: #23342d;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.dataset-btn:hover:not(:disabled) {
+  background: #f1f5f3;
+  transform: translateY(-1px);
+}
+
+.dataset-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dataset-btn.primary {
+  background: #0f3529;
+  border-color: #0f3529;
+  color: #46e5bd;
+}
+
+.dataset-btn.primary:hover:not(:disabled) {
+  background: #144637;
+}
+
+.dataset-btn.primary.active-performing {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+  animation: recPulse 1.2s infinite ease-in-out;
+}
+
+.dataset-btn.warning {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #b45309;
+}
+
+.dataset-btn.record {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
+.dataset-btn.record.recording-active {
+  background: #dc2626;
+  border-color: #b91c1c;
+  color: #fff;
+}
+
+.dataset-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  padding-top: 8px;
+  border-top: 1px solid #e5ede8;
+}
+
+.summary-pill {
+  background: #e6f0eb;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+  color: #1b382d;
+}
+
