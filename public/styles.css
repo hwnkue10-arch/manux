@@ -257,35 +257,15 @@ h2 {
 }
 
 .mouse-control-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  display: flex;
   align-items: center;
+  gap: 14px;
   margin-bottom: 12px;
 }
 
-.options-grid {
+.mouse-control-row.options-grid {
+  display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-}
-
-.mouse-sensitivity {
-  font-size: 12px;
-  color: var(--muted);
-  display: block;
-}
-
-.mouse-sensitivity output {
-  float: right;
-  font-weight: 700;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
-
-.mouse-sensitivity input {
-  display: block;
-  width: 100%;
-  margin: 8px 0 0;
-  accent-color: #0d9488;
 }
 
 /* 4 Gesture Guide Cards */
@@ -1053,6 +1033,12 @@ body.overlay-mode.show-pip #overlay-pip-box {
   background: #0f172a;
   color: #38bdf8;
   border: 1px solid #0284c7;
+}
+
+.compare-badge.ai {
+  background: #311042;
+  color: #c084fc;
+  border: 1px solid #9333ea;
 }
 
 .compare-badge.target {

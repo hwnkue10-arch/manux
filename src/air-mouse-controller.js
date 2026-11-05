@@ -1,3 +1,4 @@
+import { predictPose } from './spatial-pose-model.js';
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 const dist2D = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -91,7 +92,7 @@ class OneEuroFilter {
   }
 }
 
-function observation(landmarks, width, height, previousPinch, allowVScroll = false, pointerMode = 'index', activeZone = {x: 0.28, y: 0.20, w: 0.44, h: 0.48}) {
+function observation(landmarks, width, height, previousPinch, allowVScroll = false, pointerMode = 'index', activeZone = {x: 0.28, y: 0.20, w: 0.44, h: 0.48}, hybridAI = false, smoothedAI = null) {
   if (!Array.isArray(landmarks) || landmarks.length !== 21 || !Number.isFinite(width) ||
       !Number.isFinite(height) || width <= 0 || height <= 0) return null;
   const isIndexLike = pointerMode === 'index' || pointerMode === 'trigger';
@@ -200,22 +201,30 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     ? indexOpen
     : (indexOpen && (dist2D(points[8], points[5]) > dist2D(points[6], points[5]) * 1.32 || dist2D(points[8], points[0]) > palm * 1.05));
 
-  // Open Palm posture (🖐): Index + Middle + Ring fingers all extended forward (4~5 finger open hand)
-  const openPalmPosture = pointerMode === 'trigger' && indexOpen && middleOpen && ringOpen;
+  // 3. Pinky Extension (우클릭 - Right Click):
+  const dPinkyMCP = distZDamped(points[20], points[17]) / palm;
+  const dPinkyWrist = distZDamped(points[20], points[0]) / palm;
+  const d3PinkyMCP = dPinkyMCP;
+  const d3PinkyWrist = dPinkyWrist;
+  const pkCos = cos3D(points[17], points[18], points[20]);
+  const pkCosDIP = cos3D(points[18], points[19], points[20]);
+  const ringSpan = Math.max(0.20 * palm, distZDamped(points[16], points[13]));
+  const pkVsRing = distZDamped(points[20], points[17]) / ringSpan;
+  const dPinkyRingTip = distZDamped(points[20], points[16]) / palm;
+  const projVPinky = projV(points[20], points[17]);
 
-  // V-sign posture: In Trigger Mode, anytime Index + Middle are both extended forward, engage scroll!
-  const vSignPosture = pointerMode === 'trigger'
-    ? (indexOpen && middleOpen)
-    : (indexAiming && middleOpen && !ringOpen);
+  // DIP 꺾임 허용, PIP(pkCos) 펴짐 검사: 새끼손가락은 외측(lateral)으로 뻗으므로 전방 투영값(projVPinky)을 과도하게 제한하지 않음
+  const pkStraight = pkCos < (wasPinkyDown ? -0.15 : -0.26);
+  const pinkyStraight = pkStraight;
+  const isPinkyClenched = dPinkyWrist < 0.82 && dPinkyMCP < 0.22;
 
-  const middleRaised = middleOpen;
+  const rawPinkyExtended = !isPinkyClenched && pkStraight && (
+    wasPinkyDown
+      ? (dPinkyMCP > 0.22 && pkVsRing > 1.02 && dPinkyRingTip > 0.15)
+      : (dPinkyMCP > 0.25 && pkVsRing > 1.04 && dPinkyRingTip > 0.16)
+  );
 
-  // Trigger Scroll: Engages on either Open Palm (🖐) or V-Sign (✌️), 100% decoupled from thumb/pinky clicks!
-  const isScrollTrigger = allowVScroll && (vSignPosture || openPalmPosture);
-  const isVSignScroll = isScrollTrigger;
-
-  // 3. Thumb Extension (엄지가위 👆+👍 - Left Click):
-  //    3D 관절 각도(cos3D)와 검지 첫 마디(LM 6) 3D 이격 거리로 주먹 오작동 차단 및 다각도 클릭 안정화
+  // 4. Thumb Extension (좌클릭 - Left Click):
   const thCos234 = cos3D(points[2], points[3], points[4]);
   const thCos124 = cos3D(points[1], points[2], points[4]);
   const dThumbMCP = distZDamped(points[4], points[2]) / palm;
@@ -240,38 +249,41 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const thStraight = thCos234 < (wasThumbDown ? -0.35 : -0.48) && (thCos124 < (wasThumbDown ? -0.25 : -0.38) || thCos234 < -0.65);
 
   // Radial outward abduction: extends outward away from palm axis
-  const thAbducted = (radialDir34 > (wasThumbDown ? 0.15 : 0.25) || radial24 > (wasThumbDown ? 0.12 : 0.16));
+  // 동시 클릭(both_click: 엄지+새끼 동시 펼침) 시 손바닥 폭 변형으로 인한 방사 투영 감소를 적응적으로 수용
+  const isDualSpread = rawPinkyExtended || wasPinkyDown;
+  const thAbducted = (
+    radialDir34 > (wasThumbDown ? 0.15 : (isDualSpread ? 0.08 : 0.25)) ||
+    radial24 > (wasThumbDown ? 0.12 : (isDualSpread ? 0.05 : 0.16))
+  );
 
   // Reach & Clearance: must clearly detach from the curled index finger (LM 6) and MCP (LM 5)
   const thReach = dThumbMCP > (wasThumbDown ? 0.26 : 0.30);
   const thClearance = dThumbBase6 > (wasThumbDown ? 0.24 : 0.28) &&
                       dThumbBase5 > (wasThumbDown ? 0.22 : 0.26);
 
-  const thumbExtended = !isVSignScroll && thStraight && thAbducted && thReach && thClearance;
+  const rawThumbExtended = thStraight && thAbducted && thReach && thClearance;
 
-  // 4. Pinky Extension (우클릭 - Right Click):
-  const dPinkyMCP = distZDamped(points[20], points[17]) / palm;
-  const dPinkyWrist = distZDamped(points[20], points[0]) / palm;
-  const d3PinkyMCP = dPinkyMCP;
-  const d3PinkyWrist = dPinkyWrist;
-  const pkCos = cos3D(points[17], points[18], points[20]);
-  const pkCosDIP = cos3D(points[18], points[19], points[20]);
-  const ringSpan = Math.max(0.20 * palm, distZDamped(points[16], points[13]));
-  const pkVsRing = distZDamped(points[20], points[17]) / ringSpan;
-  const dPinkyRingTip = distZDamped(points[20], points[16]) / palm;
-  const projVPinky = projV(points[20], points[17]);
+  // STRICT MUTUAL EXCLUSIVITY:
+  // Scroll and Clicks (Left / Right / Both) are 100% mutually exclusive!
+  // If thumb or pinky is extended, a CLICK gesture is present, so SCROLL CANNOT ENGAGE.
+  const isClickGesture = Boolean(rawThumbExtended || rawPinkyExtended);
 
-  // DIP 꺾임 허용, PIP(pkCos)만 적당히 펴지고 주먹(dPinkyMCP <= 0.22)만 아니면 통과
-  const pkStraight = pkCos < (wasPinkyDown ? -0.15 : -0.26);
-  const pinkyStraight = pkStraight;
-  const pinkyForward = projVPinky > (wasPinkyDown ? 0.01 : 0.04);
-  const isPinkyClenched = dPinkyWrist < 0.82 && dPinkyMCP < 0.22;
+  // Open Palm posture (🖐): Index + Middle + Ring fingers all extended forward (neutral rest just like a fist)
+  const openPalmPosture = pointerMode === 'trigger' && indexOpen && middleOpen && ringOpen;
 
-  const pinkyExtended = !isVSignScroll && !isPinkyClenched && pinkyForward && pkStraight && (
-    wasPinkyDown
-      ? (dPinkyMCP > 0.22 && pkVsRing > 1.02 && dPinkyRingTip > 0.15)
-      : (dPinkyMCP > 0.26 && pkVsRing > 1.06 && dPinkyRingTip > 0.19)
-  );
+  // V-sign posture: EXACTLY clean V-sign (Index + Middle extended forward, Ring curled, Thumb & Pinky tucked)
+  const vSignPosture = pointerMode === 'trigger'
+    ? (indexOpen && middleOpen && !ringOpen && !isClickGesture)
+    : (indexAiming && middleOpen && !ringOpen && !isClickGesture);
+
+  const middleRaised = middleOpen;
+
+  // Trigger Scroll: Engages strictly on clean V-Sign (✌️) without any click gesture or open palm
+  const isScrollTrigger = allowVScroll && vSignPosture && !openPalmPosture;
+  const isVSignScroll = isScrollTrigger;
+
+  const pinkyExtended = !isVSignScroll && rawPinkyExtended;
+  const thumbExtended = !isVSignScroll && rawThumbExtended;
 
   const triggerAllFourFolded = !indexAiming && !middleRaised && !pinkyExtended;
   const isFist = pointerMode === 'trigger'
@@ -315,13 +327,59 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     // V-sign scroll: Middle tip raised with Index aiming (100% independent)
     const isScrollGesture = isVSignScroll;
 
-    const canPressLeft = !isFist && !isScrollGesture && thumbExtended;
-    const canPressRight = !isFist && !isScrollGesture && pinkyExtended;
+    let canPressLeft = !isFist && !openPalmPosture && !isScrollGesture && thumbExtended;
+    let canPressRight = !isFist && !openPalmPosture && !isScrollGesture && pinkyExtended;
+    let effIsScroll = isScrollGesture;
+    let effIsFist = isFist;
+    let effOpenPalm = openPalmPosture;
 
-    if (isFist) {
+    const aiPose = hybridAI ? (smoothedAI ?? predictPose(landmarks)) : null;
+    if (aiPose && aiPose.confidence >= 0.65) {
+      if (aiPose.action === 'both_click') {
+        canPressLeft = true;
+        canPressRight = true;
+        effIsFist = false;
+        effOpenPalm = false;
+        effIsScroll = false;
+      } else if (aiPose.action === 'left_click') {
+        canPressLeft = true;
+        canPressRight = false;
+        effIsFist = false;
+        effOpenPalm = false;
+        effIsScroll = false;
+      } else if (aiPose.action === 'right_click') {
+        canPressRight = true;
+        canPressLeft = false;
+        effIsFist = false;
+        effOpenPalm = false;
+        effIsScroll = false;
+      } else if (aiPose.action === 'scroll') {
+        // Enforce strict mutual exclusivity: AI scroll cannot override an active click gesture
+        if (!isClickGesture) {
+          effIsScroll = true;
+          canPressLeft = false;
+          canPressRight = false;
+          effIsFist = false;
+          effOpenPalm = false;
+        }
+      } else if (aiPose.action === 'idle') {
+        effIsFist = true;
+        canPressLeft = false;
+        canPressRight = false;
+        effIsScroll = false;
+      } else if (aiPose.action === 'move') {
+        canPressLeft = false;
+        canPressRight = false;
+        effIsScroll = false;
+        effIsFist = false;
+        effOpenPalm = false;
+      }
+    }
+
+    if (effIsFist || effOpenPalm) {
       mode = 'idle';
       pinch = null;
-    } else if (isScrollGesture) {
+    } else if (effIsScroll) {
       mode = 'scroll';
       pinch = null;
     } else if (canPressLeft && canPressRight) {
@@ -333,9 +391,6 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     } else if (canPressRight) {
       mode = 'right';
       pinch = 'right';
-    } else if (!indexAiming) {
-      mode = 'frozen';
-      pinch = null;
     } else {
       mode = 'move';
       pinch = null;
@@ -356,9 +411,9 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     const indexStraight = cos3D(points[5], points[6], points[8]) < -0.75;
 
     gates = {
-      isFist,
-      isScrollGesture,
-      openPalm: openPalmPosture,
+      isFist: effIsFist,
+      isScrollGesture: effIsScroll,
+      openPalm: effOpenPalm,
       indexAiming,
       indexStraight,
       isIndexStraight: indexStraight,
@@ -368,12 +423,13 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
       indexFolded: !indexAiming,
       canPressLeft,
       canPressRight,
-      thumbExtended,
+      thumbExtended: canPressLeft,
       dThumbMCP: Number(dThumbMCP.toFixed(3)),
       dThumbWrist: Number(d3ThumbWrist.toFixed(3)),
       dThumbBase: Number(d3ThumbIndexMCP.toFixed(3)),
       d3ThumbToKnuckles: Number(d3ThumbToKnuckles.toFixed(3)),
-      pinkyExtended,
+      pinkyExtended: canPressRight,
+      aiPose: aiPose || null,
       pinkyStraight: pkStraight,
       pkCos: Number(pkCos.toFixed(3)),
       pkCosDIP: Number(pkCosDIP.toFixed(3)),
@@ -526,14 +582,17 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
 /** Pure landmark-to-input controller. It never sends OS events or stores camera data. */
 export class AirMouseController {
-  constructor({pointerMode = 'palm', sensitivity = 1800, smoothing = 0.45, holdMs = 160, ballistics = false, clickLock = false, vScroll = false, rotationDeg = 0, gainY = 1.0, activeZone = {x: 0.28, y: 0.20, w: 0.44, h: 0.48}} = {}) {
+  constructor({pointerMode = 'palm', hybridAI = false, sensitivity = 1800, scrollSpeed = 450, smoothing = 0.45, holdMs = 160, ballistics = false, clickLock = false, vScroll = false, rotationDeg = 0, gainY = 1.0, activeZone = {x: 0.28, y: 0.20, w: 0.44, h: 0.48}} = {}) {
     if (!Number.isFinite(sensitivity) || sensitivity < 100 || sensitivity > 6000 ||
         !Number.isFinite(smoothing) || smoothing <= 0 || smoothing > 1 ||
         !Number.isFinite(holdMs) || holdMs < 0 || holdMs > 2000) {
       throw new RangeError('Invalid air mouse sensitivity, smoothing, or hold time.');
     }
     this.pointerMode = pointerMode;
+    this.hybridAI = Boolean(hybridAI);
+    this.lastAIPose = null;
     this.sensitivity = sensitivity;
+    this.scrollSpeed = Number.isFinite(scrollSpeed) ? scrollSpeed : 450;
     this.smoothing = smoothing;
     this.holdMs = holdMs;
     this.ballistics = Boolean(ballistics);
@@ -569,6 +628,8 @@ export class AirMouseController {
     this.scrollVelocity = 0;
     this.scrollDown = false;
     this.scrollReleaseCount = 0;
+    this.scrollCooldownFrames = 0;
+    this.aiBuffer = [];
     this.fistFrames = 0;
     this.reset();
   }
@@ -652,6 +713,10 @@ export class AirMouseController {
     this.scrollAnchorY = null;
     this.lastScrollTrackY = null;
     this.scrollVelocity = 0;
+    this.scrollDown = false;
+    this.scrollReleaseCount = 0;
+    this.scrollCooldownFrames = 0;
+    this.aiBuffer = [];
     this.fistFrames = 0;
     return this.state('disabled', [{type:'release'}]);
   }
@@ -696,6 +761,10 @@ export class AirMouseController {
     this.scrollAnchorX = null;
     this.scrollAnchorY = null;
     this.scrollVelocity = 0;
+    this.scrollDown = false;
+    this.scrollReleaseCount = 0;
+    this.scrollCooldownFrames = 0;
+    this.aiBuffer = [];
     this.fistFrames = 0;
     if (disarm) {
       this.armed = false;
@@ -720,8 +789,39 @@ export class AirMouseController {
     if (this.lastTime !== null && now <= this.lastTime) return this.state('stale');
     const gap = this.lastTime !== null && now - this.lastTime > MAX_GAP_MS;
     this.lastTime = now;
+    if (gap) {
+      this.aiBuffer = [];
+    }
     const isIndexLike = this.pointerMode === 'index' || this.pointerMode === 'trigger';
-    const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll, this.pointerMode, this.activeZone) : null;
+    let smoothedAI = null;
+    if (this.hybridAI && quality === true && Array.isArray(landmarks) && landmarks.length === 21) {
+      const rawAI = predictPose(landmarks);
+      if (rawAI) {
+        this.aiBuffer.push(rawAI);
+        if (this.aiBuffer.length > 3) this.aiBuffer.shift();
+
+        const weights = {};
+        for (let i = 0; i < this.aiBuffer.length; i++) {
+          const item = this.aiBuffer[i];
+          const recencyMultiplier = (i === this.aiBuffer.length - 1) ? 2.0 : 1.0;
+          weights[item.action] = (weights[item.action] || 0) + item.confidence * recencyMultiplier;
+        }
+        let best = rawAI.action;
+        let maxW = 0;
+        for (const [act, w] of Object.entries(weights)) {
+          if (w > maxW) {
+            maxW = w;
+            best = act;
+          }
+        }
+        smoothedAI = {
+          action: best,
+          confidence: rawAI.action === best ? rawAI.confidence : Math.min(rawAI.confidence, 0.85),
+          probabilities: rawAI.probabilities,
+        };
+      }
+    }
+    const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll, this.pointerMode, this.activeZone, this.hybridAI, smoothedAI) : null;
     if (observed?.gates) this.lastGates = observed.gates;
     if (!observed) {
       // Index/Trigger mode: a few dropped/poor frames must not break an ongoing drag.
@@ -776,7 +876,15 @@ export class AirMouseController {
       const g = observed.gates;
 
       // Scroll (🖐 Open Palm / ✌️ V-sign trigger): Engages wheel continuously with hysteresis
-      if (g.isScrollGesture) {
+      // STRICT MUTUAL EXCLUSIVITY & ANTI-CHATTERING:
+      // 1. Scroll entrance requires 2 consecutive frames and CANNOT start while a button is held
+      if (g.isScrollGesture && !this.leftDown && !this.rightDown) {
+        this.scrollFrames++;
+      } else {
+        this.scrollFrames = 0;
+      }
+
+      if (!this.scrollDown && this.scrollFrames >= 2) {
         if (this.leftDown) {
           this.leftDown = false;
           this.leftReleaseCount = 0;
@@ -789,28 +897,34 @@ export class AirMouseController {
         }
         this.scrollDown = true;
         this.scrollReleaseCount = 0;
-        this.scrollFrames = 0;
       } else if (this.scrollDown) {
         // Exit scroll when hand turns into a fist OR returns to clean single index aiming
         const returningToAim = Boolean(g.isIndexStraight && !g.middleRaised && !g.ringOpen);
-        if (g.isFist || ++this.scrollReleaseCount >= (returningToAim ? 4 : 8)) {
+        if (g.isFist || g.openPalm || ++this.scrollReleaseCount >= (returningToAim ? 4 : 8)) {
           this.scrollDown = false;
           this.scrollReleaseCount = 0;
           this.scrollFrames = 0;
+          this.scrollCooldownFrames = 4; // 4-frame anti-chatter cooldown on scroll exit
         }
       }
       const scrolling = this.scrollDown;
 
-      // Left Click (Thumb trigger): instant press, 2-frame debounced release
+      if (this.scrollCooldownFrames > 0) {
+        this.scrollCooldownFrames--;
+      }
+      const clickAllowed = !scrolling && this.scrollCooldownFrames === 0;
+
+      // Left Click (Thumb trigger): instant press when click is allowed, 2-frame debounced release
       if (this.leftDown) {
-        if (!g.thumbExtended) {
-          if (++this.leftReleaseCount >= 2) {
+        const aiReleasesLeft = Boolean(g.aiPose && g.aiPose.confidence >= 0.70 && g.aiPose.action === 'right_click');
+        if (!g.thumbExtended || aiReleasesLeft) {
+          if (aiReleasesLeft || ++this.leftReleaseCount >= 2) {
             this.leftDown = false;
             this.leftReleaseCount = 0;
             events.push({type: 'button', button: 'left', down: false});
           }
         } else this.leftReleaseCount = 0;
-      } else if (g.canPressLeft && !scrolling) {
+      } else if (g.canPressLeft && clickAllowed) {
         this.leftDown = true;
         this.leftReleaseCount = 0;
         this.dragDisplacement = 0;
@@ -819,16 +933,17 @@ export class AirMouseController {
         events.push({type: 'button', button: 'left', down: true});
       }
 
-      // Right Click (Pinky trigger): instant press, 2-frame debounced release
+      // Right Click (Pinky trigger): instant press when click is allowed, 2-frame debounced release
       if (this.rightDown) {
-        if (!g.pinkyExtended) {
-          if (++this.rightReleaseCount >= 2) {
+        const aiReleasesRight = Boolean(g.aiPose && g.aiPose.confidence >= 0.70 && g.aiPose.action === 'left_click');
+        if (!g.pinkyExtended || aiReleasesRight) {
+          if (aiReleasesRight || ++this.rightReleaseCount >= 2) {
             this.rightDown = false;
             this.rightReleaseCount = 0;
             events.push({type: 'button', button: 'right', down: false});
           }
         } else this.rightReleaseCount = 0;
-      } else if (g.canPressRight && !scrolling) {
+      } else if (g.canPressRight && clickAllowed) {
         this.rightDown = true;
         this.rightReleaseCount = 0;
         events.push({type: 'button', button: 'right', down: true});
@@ -846,16 +961,14 @@ export class AirMouseController {
       } else if (this.rightDown) {
         this.mode = 'right';
         this.fistFrames = 0;
-      } else if (g.indexFolded) {
-        if (g.isFist) {
-          if (this.mode === 'idle' || ++this.fistFrames >= 4) {
-            this.mode = 'idle';
-          } else {
-            this.mode = 'frozen';
-          }
+      } else if (g.openPalm) {
+        this.mode = 'idle';
+        this.fistFrames = 0;
+      } else if (g.isFist) {
+        if (this.mode === 'idle' || ++this.fistFrames >= 2) {
+          this.mode = 'idle';
         } else {
-          this.mode = 'frozen';
-          this.fistFrames = 0;
+          this.mode = 'move';
         }
       } else {
         this.mode = 'move';
@@ -991,7 +1104,7 @@ export class AirMouseController {
         let velocity = 0;
         if (Math.abs(offsetY) > DEADZONE) {
           const delta = offsetY > 0 ? (offsetY - DEADZONE) : (offsetY + DEADZONE);
-          velocity = delta * this.sensitivity * 0.45;
+          velocity = delta * this.scrollSpeed;
         }
         this.scrollVelocity = velocity;
 
@@ -1136,7 +1249,7 @@ export class AirMouseController {
         const motionY = observed.anchor.y - this.lastTouchY;
         this.lastTouchY = observed.anchor.y;
         if (Math.abs(motionY) > 0.0008) {
-          const scrollInput = -motionY * this.sensitivity * 1.6;
+          const scrollInput = -motionY * this.scrollSpeed;
           this.remaining.y += scrollInput;
           const wheel = clamp(Math.trunc(this.remaining.y / 6) * 6, -120, 120);
           if (wheel) {

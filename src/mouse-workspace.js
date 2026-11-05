@@ -1,4 +1,4 @@
-import {PoseSnapshotStudio, SUPPORTED_ACTIONS} from './recorder/pose-snapshot-studio.js';
+import {PoseSnapshotStudio, SUPPORTED_ACTIONS, normalizeActionId} from './recorder/pose-snapshot-studio.js';
 import {RawTemporalRecorder} from './recorder/raw-temporal-recorder.js';
 import {AirMouseController} from './air-mouse-controller.js';
 
@@ -44,14 +44,16 @@ export class MouseWorkspace {
 
     // Pure unchanged AirMouseController instantiation
     const createController = () => {
-      const sensitivity = Number(this.$('#mouse-sensitivity')?.value ?? 1800);
       const pointerMode = this.$('#mouse-pointer-mode')?.value ?? 'trigger';
       const ballistics = this.$('#mouse-ballistics') ? this.$('#mouse-ballistics').checked : true;
       const clickLock = this.$('#mouse-click-lock') ? this.$('#mouse-click-lock').checked : true;
       const crossView = this.$('#mouse-cross-view') ? this.$('#mouse-cross-view').checked : true;
+      const hybridAI = this.$('#mouse-hybrid-ai') ? this.$('#mouse-hybrid-ai').checked : true;
       return new AirMouseController({
         pointerMode,
-        sensitivity,
+        hybridAI,
+        scrollSpeed: 450,
+        sensitivity: 450,
         smoothing: 0.70,
         ballistics,
         clickLock,
@@ -71,7 +73,7 @@ export class MouseWorkspace {
     this.recorder = new RawTemporalRecorder();
     this.snapshotStudio = new PoseSnapshotStudio();
     this.selectedAction = 'move';
-    this.trialCounts = { move: 0, freeze: 0, left_click: 0, right_click: 0, scroll: 0, idle: 0 };
+    this.trialCounts = { move: 0, left_click: 0, right_click: 0, both_click: 0, scroll: 0, idle: 0 };
     this.targetTrials = 10;
     this.active = true;
     this.ready = false;
@@ -117,12 +119,7 @@ export class MouseWorkspace {
       this.controller = createController();
       this.updateGuideCards();
       const newMode = this.controller?.pointerMode ?? 'trigger';
-      if (newMode === 'index' && this.selectedAction === 'freeze') {
-        this.selectedAction = 'move';
-      }
-      if (newMode === 'index' && this.snapshotStudio.selectedGroundTruth === 'freeze') {
-        this.snapshotStudio.selectedGroundTruth = 'move';
-      }
+      
       this.syncDatasetUI();
       this.syncSnapshotStudioUI();
     });
@@ -130,14 +127,17 @@ export class MouseWorkspace {
     const updateSettings = (msg) => {
       this.stop(msg);
       this.controller = createController();
-      if (this.$('#mouse-sensitivity-output') && this.$('#mouse-sensitivity')) {
-        this.$('#mouse-sensitivity-output').textContent = String(this.$('#mouse-sensitivity').value);
-      }
     };
-    this.$('#mouse-sensitivity')?.addEventListener('input', () => updateSettings('감도를 바꿨습니다. 제어를 다시 켜세요.'));
     this.$('#mouse-ballistics')?.addEventListener('change', () => updateSettings('포인터 가속도 설정을 바꿨습니다. 제어를 다시 켜세요.'));
     this.$('#mouse-click-lock')?.addEventListener('change', () => updateSettings('클릭 흔들림 방지 설정을 바꿨습니다. 제어를 다시 켜세요.'));
     this.$('#mouse-cross-view')?.addEventListener('change', () => updateSettings('Cross-View 대각선 보정 설정을 바꿨습니다. 제어를 다시 켜세요.'));
+    this.$('#mouse-hybrid-ai')?.addEventListener('change', () => {
+      const enabled = Boolean(this.$('#mouse-hybrid-ai')?.checked);
+      if (this.controller) {
+        this.controller.hybridAI = enabled;
+      }
+      this.showToast(enabled ? '🤖 AI 제스처 보정 활성화 (98% 정확도)' : '⚙️ 순수 기하학 제스처 모드 전환');
+    });
 
     // Active Zone Presets & Sliders
     this.$('#btn-zone-default')?.addEventListener('click', () => {
@@ -264,11 +264,11 @@ export class MouseWorkspace {
       } else if (event.key === '1') {
         this.setGroundTruthAction('move');
       } else if (event.key === '2') {
-        this.setGroundTruthAction('freeze');
-      } else if (event.key === '3') {
         this.setGroundTruthAction('left_click');
-      } else if (event.key === '4') {
+      } else if (event.key === '3') {
         this.setGroundTruthAction('right_click');
+      } else if (event.key === '4') {
+        this.setGroundTruthAction('both_click');
       } else if (event.key === '5') {
         this.setGroundTruthAction('scroll');
       } else if (event.key === '6' || event.key === '0') {
@@ -450,11 +450,10 @@ export class MouseWorkspace {
       switch (mode) {
         case 'idle': return '쉬는 중 (주먹/휴식)';
         case 'move': return '👆 1: 포인터 이동 (검지)';
-        case 'frozen': return '🔒 커서 고정 (엄지 펴서 클릭)';
         case 'left': return '👍 좌클릭 · 드래그 (엄지)';
         case 'right': return '🤙 우클릭 (새끼손가락)';
-        case 'both': return '🤙 좌우 동시 클릭';
-        case 'scroll': return '🖐️ 휠 스크롤 (손바닥/V자)';
+        case 'both': return '👐 좌우 동시 클릭';
+        case 'scroll': return '✌️ 휠 스크롤 (V자)';
         default: return '대기 중';
       }
     } else {
@@ -463,7 +462,7 @@ export class MouseWorkspace {
         case 'move': return '👆 포인터 이동';
         case 'left': return '🤏 좌클릭 · 드래그';
         case 'right': return '👆 우클릭';
-        case 'scroll': return '🖐️ 휠 스크롤';
+        case 'scroll': return '✌️ 휠 스크롤';
         default: return '대기 중';
       }
     }
@@ -476,10 +475,10 @@ export class MouseWorkspace {
       const a2 = articles[1]?.querySelector('div');
       const a3 = articles[2]?.querySelector('div');
       const a4 = articles[3]?.querySelector('div');
-      if (a1) a1.innerHTML = '<h3>👆 1: 포인터 이동 (검지)</h3><p>검지 끝(LM 8) 직접 추적<br>검지를 접으면 그 자리에 커서 고정 (Freeze)</p>';
-      if (a2) a2.innerHTML = '<h3>👍 엄지 펴기: 좌클릭 & 드래그</h3><p>엄지만 펴면 즉시 좌클릭 & 유지 시 드래그<br>검지 접고 엄지 펴면 흔들림 0% 정밀 클릭</p>';
+      if (a1) a1.innerHTML = '<h3>👆 1: 포인터 이동 (검지)</h3><p>검지 끝(LM 8) 직접 추적<br>주먹(✊)을 쥐면 최근 조준 위치에 커서 유지</p>';
+      if (a2) a2.innerHTML = '<h3>👍 엄지 펴기: 좌클릭 & 드래그</h3><p>엄지만 펴면 즉시 좌클릭 & 유지 시 드래그<br>클릭 흔들림 방지로 미세 떨림 0% 정밀 클릭</p>';
       if (a3) a3.innerHTML = '<h3>🤙 소지 펴기: 우클릭</h3><p>새끼손가락(소지)만 펴면 우클릭<br>엄지와 소지를 같이 펴면 동시 클릭</p>';
-      if (a4) a4.innerHTML = '<h3>🖐️ 손바닥 펴기: 휠 스크롤</h3><p>손바닥 활짝(🖐) 또는 V자(✌️) 펴고 위아래 이동 시 스크롤<br>주먹(✊) 쥐면 완전한 쉬는 자세</p>';
+      if (a4) a4.innerHTML = '<h3>✌️ V자 펴기: 휠 스크롤</h3><p>검지와 중지로 V자(✌️)를 펴고 위아래 이동 시 스크롤<br>손바닥(🖐)과 주먹(✊)은 완전한 쉬는 자세</p>';
     }
   }
 
@@ -586,7 +585,7 @@ export class MouseWorkspace {
       this.enabled = true;
       this.paused = false;
       this.lastFrame = performance.now();
-      this.status('👆 검지로 포인터를 이동하세요. 엄지(좌클릭·드래그) · 소지(우클릭) · 🖐휠 스크롤입니다.');
+      this.status('👆 검지로 포인터를 이동하세요. 엄지(좌클릭·드래그) · 소지(우클릭) · ✌️V자 휠 스크롤입니다.');
     } catch (error) {
       this.stop(error.message);
     } finally {
@@ -694,7 +693,7 @@ export class MouseWorkspace {
       if (this.paused) {
         this.status('⏸️ 마우스 제어가 일시 정지되었습니다. (재개 버튼 클릭)');
       } else {
-        this.status(hints[state.phase] || (state.mode === 'idle' ? '쉬는 중입니다 (주먹/휴식).' : (state.mode === 'scroll' ? '🖐️ 휠 스크롤 중 · 손을 위아래로 그으세요.' : (state.mode === 'frozen' ? '🔒 커서 고정됨 · 엄지를 펴서 클릭하세요.' : `${this.getModeLabel(state.mode)} 중`))));
+        this.status(hints[state.phase] || (state.mode === 'idle' ? '쉬는 중입니다 (주먹/휴식).' : (state.mode === 'scroll' ? '✌️ 휠 스크롤 중 · 손을 위아래로 그으세요.' : `${this.getModeLabel(state.mode)} 중`)));
       }
     } else {
       const modeLabel = this.getModeLabel(state.mode);
@@ -750,9 +749,8 @@ export class MouseWorkspace {
     // 1. Index Reticle (LM 8): Active pointer or locked target
     if (idx) {
       ctx.save();
-      const isFrozen = state.mode === 'frozen' || Boolean(state.fingertips?.index?.frozen);
       const isClicking = state.mode === 'left' || state.mode === 'both';
-      ctx.fillStyle = isFrozen ? '#38bdf8' : (isClicking ? '#22c55e' : '#00f0ff');
+      ctx.fillStyle = isClicking ? '#22c55e' : '#00f0ff';
       ctx.shadowColor = ctx.fillStyle;
       ctx.shadowBlur = 18;
 
@@ -776,9 +774,7 @@ export class MouseWorkspace {
       ctx.stroke();
 
       ctx.font = 'bold 12px "Segoe UI", sans-serif';
-      if (isFrozen) {
-        ctx.fillText('🔒 고정됨 [LM8 LOCKED]', idx.x + 24, idx.y - 12);
-      } else if (isClicking) {
+      if (isClicking) {
         ctx.fillText('🎯 타겟 클릭 중', idx.x + 24, idx.y - 12);
       } else {
         ctx.fillText('INDEX [LM8]', idx.x + 24, idx.y - 12);
@@ -1404,11 +1400,22 @@ export class MouseWorkspace {
   }
 
   syncSnapshotStudioComparison(state, quality) {
-    const predicted = state?.mode || 'idle';
+    const rawPredicted = state?.mode || 'idle';
+    const predicted = normalizeActionId(rawPredicted);
     const groundTruth = this.snapshotStudio.selectedGroundTruth;
 
     const predEl = this.$('#live-predicted-action');
     if (predEl) predEl.textContent = predicted;
+
+    const aiEl = this.$('#live-ai-action');
+    const aiPose = state?.gates?.aiPose;
+    if (aiEl) {
+      if (aiPose) {
+        aiEl.textContent = `🤖 ${aiPose.action} (${Math.round(aiPose.confidence * 100)}%)`;
+      } else {
+        aiEl.textContent = `🤖 AI 대기`;
+      }
+    }
 
     const gtDef = SUPPORTED_ACTIONS.find(a => a.id === groundTruth) || SUPPORTED_ACTIONS[0];
     const gtEl = this.$('#live-ground-truth-action');

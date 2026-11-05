@@ -8,8 +8,10 @@
     "start": "node server.js",
     "desktop": "electron desktop/main.mjs",
     "setup": "node scripts/setup.mjs",
-    "test": "node -e \"['src/air-mouse-controller.js', 'src/mouse-workspace.js', 'src/app.js', 'desktop/main.mjs', 'src/recorder/raw-temporal-recorder.js', 'src/recorder/pose-snapshot-studio.js'].forEach(f => require('child_process').execSync('node --check ' + f))\" && node --test tests/air-mouse-controller.test.js tests/desktop-mouse.test.js tests/raw-temporal-recorder.test.js tests/annotation-recorder.test.js tests/pose-snapshot-studio.test.js",
-    "test:native": "node scripts/test-desktop-mouse.mjs"
+    "test": "node -e \"['src/air-mouse-controller.js', 'src/mouse-workspace.js', 'src/app.js', 'desktop/main.mjs', 'src/recorder/raw-temporal-recorder.js', 'src/recorder/pose-snapshot-studio.js', 'src/spatial-pose-model.js'].forEach(f => require('child_process').execSync('node --check ' + f))\" && node --test tests/air-mouse-controller.test.js tests/desktop-mouse.test.js tests/raw-temporal-recorder.test.js tests/annotation-recorder.test.js tests/pose-snapshot-studio.test.js tests/spatial-pose-model.test.js",
+    "test:native": "node scripts/test-desktop-mouse.mjs",
+    "test:cv": "node scripts/cross-validate.mjs",
+    "train": "node scripts/train-spatial-model.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.2.0"

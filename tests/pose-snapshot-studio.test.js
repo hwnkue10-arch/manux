@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PoseSnapshotStudio, SUPPORTED_ACTIONS } from '../src/recorder/pose-snapshot-studio.js';
+import { PoseSnapshotStudio, SUPPORTED_ACTIONS, normalizeActionId } from '../src/recorder/pose-snapshot-studio.js';
 
 function createDummyLandmarks(baseX = 0.5, baseY = 0.5) {
   const points = [];
@@ -95,31 +95,70 @@ test('PoseSnapshotStudio: rejects capture when tracking is invalid or quality is
   assert.equal(studio.getSamples().length, 0);
 });
 
-test('PoseSnapshotStudio: mode segregation rejects unsupported actions (freeze in Index mode)', () => {
+test('PoseSnapshotStudio: action validation rejects unknown actions and accepts both_click', () => {
   const studio = new PoseSnapshotStudio();
   const lm = createDummyLandmarks();
 
-  // Index mode does not have "freeze"
+  // Unknown action rejected
   const res = studio.captureSnapshot({
-    groundTruthAction: 'freeze',
+    groundTruthAction: 'unknown_action_xyz',
     landmarks: lm,
     quality: true,
-    mode: 'index',
+    mode: 'trigger',
   });
 
   assert.equal(res.success, false);
   assert.equal(res.reason, 'unsupported_action_for_mode');
   assert.equal(studio.getSamples().length, 0);
 
-  // Trigger mode accepts "freeze"
-  const resTrigger = studio.captureSnapshot({
-    groundTruthAction: 'freeze',
+  // both_click accepted
+  const resBoth = studio.captureSnapshot({
+    groundTruthAction: 'both_click',
     landmarks: lm,
     quality: true,
     mode: 'trigger',
   });
-  assert.equal(resTrigger.success, true);
+  assert.equal(resBoth.success, true);
   assert.equal(studio.getSamples().length, 1);
+});
+
+test('PoseSnapshotStudio: controller mode left/right/both normalizes cleanly to left_click/right_click/both_click', () => {
+  const studio = new PoseSnapshotStudio();
+  const lm = createDummyLandmarks();
+
+  // Controller returns raw 'left', groundTruth is 'left_click' -> must be a MATCH!
+  const resLeft = studio.captureSnapshot({
+    groundTruthAction: 'left_click',
+    geometryState: { mode: 'left' },
+    landmarks: lm,
+    mode: 'trigger',
+  });
+  assert.equal(resLeft.success, true);
+  assert.equal(resLeft.sample.predictedAction, 'left_click');
+  assert.equal(resLeft.sample.isMatch, true);
+  assert.equal(resLeft.sample.isFailureSample, false);
+
+  // Controller returns raw 'right', groundTruth is 'right_click' -> must be a MATCH!
+  const resRight = studio.captureSnapshot({
+    groundTruthAction: 'right_click',
+    geometryState: { mode: 'right' },
+    landmarks: lm,
+    mode: 'trigger',
+  });
+  assert.equal(resRight.success, true);
+  assert.equal(resRight.sample.predictedAction, 'right_click');
+  assert.equal(resRight.sample.isMatch, true);
+
+  // Controller returns raw 'both', groundTruth is 'both_click' -> must be a MATCH!
+  const resBoth = studio.captureSnapshot({
+    groundTruthAction: 'both_click',
+    geometryState: { mode: 'both' },
+    landmarks: lm,
+    mode: 'trigger',
+  });
+  assert.equal(resBoth.success, true);
+  assert.equal(resBoth.sample.predictedAction, 'both_click');
+  assert.equal(resBoth.sample.isMatch, true);
 });
 
 test('PoseSnapshotStudio: deleteLastSample() and deleteSampleById() support undo operations', () => {

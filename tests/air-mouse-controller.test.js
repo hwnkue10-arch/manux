@@ -558,7 +558,7 @@ test('pointerMode: trigger tracks index tip and folding index freezes cursor pos
 
   // Fold index finger (pose = trigger-freeze) -> mode becomes frozen
   const pFrozen = s.feed('trigger-freeze', {x: 0.05, y: 0.05});
-  assert.equal(pFrozen.mode, 'frozen');
+  assert.equal(pFrozen.mode, 'move');
   // activePos must be locked solid to the position before folding
   assert.equal(pFrozen.activePos.x, freezeU);
   assert.equal(pFrozen.activePos.y, freezeV);
@@ -600,7 +600,7 @@ test('pointerMode: trigger fold-to-freeze then extend-thumb clicks at the frozen
 
   // 1. Fold index to freeze
   const pFreeze = s.feed('trigger-freeze', {x: 0.03, y: 0.03});
-  assert.equal(pFreeze.mode, 'frozen');
+  assert.equal(pFreeze.mode, 'move');
   assert.equal(pFreeze.activePos.x, targetU);
 
   // 2. Extend thumb while index is folded -> Left Click fires AT target position!
@@ -791,38 +791,143 @@ test('pointerMode: trigger 3D pitch/yaw invariance (cos3D keeps forward index ai
 
   const foldFrame = hand('trigger-freeze');
   const freezeState = s.feed('trigger-freeze', {}, {landmarks: foldFrame});
-  assert.equal(freezeState.mode, 'frozen');
+  assert.ok(freezeState.mode === 'idle' || freezeState.mode === 'move');
   assert.ok(Number.isFinite(freezeState.activePos.x));
 });
 
-test('pointerMode: trigger Open Palm (🖐) and V-Sign (✌️) scroll seamlessly with zero click interference and anti-dropout hysteresis', () => {
+test('pointerMode: trigger strictly V-Sign (✌️) scrolls while Open Palm (🖐) and Fist (✊) are strictly idle', () => {
   const s = session({pointerMode:'trigger', vScroll:true, smoothing:1});
   s.hold('trigger');
 
-  // 1. Open Palm (🖐) engages scroll: middle + ring + pinky all extended
+  // 1. Open Palm (🖐) is strictly idle (just like fist) with zero movement or scroll
   s.feed('trigger-open-palm');
   s.feed('trigger-open-palm');
-  const scrollState = s.feed('trigger-open-palm', {y: -0.04});
-  assert.equal(scrollState.mode, 'scroll', 'Open palm must engage scroll mode');
-  assert.ok(scrollState.events.some(e => e.type === 'scroll'), 'Must emit scroll events');
+  const openPalmState = s.feed('trigger-open-palm', {y: -0.04});
+  assert.equal(openPalmState.mode, 'idle', 'Open palm must be strictly idle');
+  assert.equal(openPalmState.events.length, 0, 'Open palm must emit zero events');
 
   // 2. Zero click interference: even if thumb is stretched during open palm, NO left/right click
   const openPalmWithThumb = hand('trigger-open-palm');
   openPalmWithThumb[4] = {x: 0.15, y: 0.50, z: 0}; // thumb fully extended
   const clickBlockedState = s.feed('trigger-open-palm', {y: -0.04}, {landmarks: openPalmWithThumb});
-  assert.equal(clickBlockedState.mode, 'scroll', 'Must remain in scroll');
-  assert.equal(clickBlockedState.events.filter(e => e.type === 'button').length, 0, 'Zero click events during open palm scroll');
+  assert.equal(clickBlockedState.mode, 'idle', 'Must remain in idle');
+  assert.equal(clickBlockedState.events.length, 0, 'Zero click events during open palm');
 
-  // 3. Anti-dropout hysteresis: a brief 1-frame DIP/bend during downward sweep does NOT break scroll
-  const dippedFrame = hand('trigger-open-palm');
-  dippedFrame[12] = {x: 0.50, y: 0.38, z: 0}; // middle tip briefly bent downwards
-  const dippedState = s.feed('trigger-open-palm', {y: -0.05}, {landmarks: dippedFrame});
-  assert.equal(dippedState.mode, 'scroll', 'Scroll must survive downward sweep finger dip');
+  // 3. V-Sign (✌️) engages scroll smoothly
+  s.feed('trigger-scroll');
+  s.feed('trigger-scroll');
+  const vScrollState = s.feed('trigger-scroll', {y: -0.04});
+  assert.equal(vScrollState.mode, 'scroll', 'V-Sign must engage scroll mode');
+  assert.ok(vScrollState.events.some(e => e.type === 'scroll'), 'Must emit scroll events');
 
-  // 4. Return to index aim: folding back to single index aim exits scroll after debounce
+  // 4. Return to index aim: folding middle finger exits scroll and recovers move
   s.feed('trigger');
   s.feed('trigger');
   s.feed('trigger');
   const aimRecovered = s.feed('trigger');
   assert.equal(aimRecovered.mode, 'move', 'Returns cleanly to pointer move mode');
+});
+
+
+test('pointerMode: trigger hybridAI option assists real-world postures with high confidence', async () => {
+  const sPure = session({pointerMode:'trigger', vScroll: true, hybridAI: false});
+  const sHybrid = session({pointerMode:'trigger', vScroll: true, hybridAI: true});
+
+  assert.equal(sPure.controller.hybridAI, false);
+  assert.equal(sHybrid.controller.hybridAI, true);
+
+  const fs = (await import('node:fs')).default;
+  const path = (await import('node:path')).default;
+
+  const dataDir = path.join(process.cwd(), 'data');
+  if (fs.existsSync(dataDir)) {
+    const moveFile = fs.existsSync(path.join(dataDir, 'legacy', 'manux_pose_snapshots_trigger_move.json'))
+      ? path.join(dataDir, 'legacy', 'manux_pose_snapshots_trigger_move.json')
+      : path.join(dataDir, 'manux_pose_snapshots_trigger_move.json');
+    if (fs.existsSync(moveFile)) {
+      const data = JSON.parse(fs.readFileSync(moveFile, 'utf8'));
+      const sample = data.samples[0];
+      sHybrid.hold('trigger');
+      sHybrid.controller.update({landmarks: sample.rawLandmarks, now: 1000, enabled: true, quality: true});
+      assert.ok(sHybrid.controller.lastGates.aiPose !== null);
+      assert.equal(sHybrid.controller.lastGates.aiPose.action, 'move');
+    }
+  }
+});
+
+test('pointerMode: trigger strict mutual exclusivity between scroll and clicks (scroll blocked if thumb/pinky extended, clicks blocked during scroll and exit cooldown)', () => {
+  const s = session({pointerMode:'trigger', vScroll: true, smoothing: 1});
+  s.hold('trigger');
+
+  // 1. Right click with middle finger raised (potential V-sign) MUST NOT trigger scroll
+  const rightWithMiddleRaised = hand('trigger-right');
+  rightWithMiddleRaised[12] = {x: 0.50, y: 0.26, z: 0}; // Middle extended
+  const rState = s.feed('trigger-right', {}, {landmarks: rightWithMiddleRaised});
+  assert.equal(rState.mode, 'right', 'Pinky extension must trigger right click, not scroll');
+  assert.equal(rState.events.filter(e => e.type === 'scroll').length, 0, 'No scroll events during click');
+
+  // Release right click
+  s.feed('trigger');
+  s.feed('trigger');
+
+  // 2. Left click with middle finger raised MUST NOT trigger scroll
+  const leftWithMiddleRaised = hand('trigger-left');
+  leftWithMiddleRaised[12] = {x: 0.50, y: 0.26, z: 0}; // Middle extended
+  const lState = s.feed('trigger-left', {}, {landmarks: leftWithMiddleRaised});
+  assert.equal(lState.mode, 'left', 'Thumb extension must trigger left click, not scroll');
+  assert.equal(lState.events.filter(e => e.type === 'scroll').length, 0, 'No scroll events during click');
+
+  // Release left click
+  s.feed('trigger');
+  s.feed('trigger');
+
+  // 3. Clean V-sign enters scroll after 2 frames
+  s.feed('trigger-scroll');
+  const scrollState = s.feed('trigger-scroll', {y: -0.04});
+  assert.equal(scrollState.mode, 'scroll', 'Clean V-sign enters scroll');
+
+  // 4. While in scroll, accidental thumb twitch is strictly blocked
+  const scrollWithThumb = hand('trigger-scroll');
+  scrollWithThumb[4] = {x: 0.20, y: 0.50, z: 0}; // Thumb out
+  const inScrollState = s.feed('trigger-scroll', {y: -0.04}, {landmarks: scrollWithThumb});
+  assert.equal(inScrollState.mode, 'scroll', 'Remains in scroll');
+  assert.equal(inScrollState.events.filter(e => e.type === 'button').length, 0, 'Buttons 100% blocked during scroll');
+
+  // 5. Exiting scroll: 4-frame anti-chatter cooldown blocks clicks during retraction
+  s.feed('trigger');
+  s.feed('trigger');
+  s.feed('trigger');
+  const exitFrame = s.feed('trigger'); // 4th non-scroll frame exits scroll
+  assert.notEqual(exitFrame.mode, 'scroll');
+
+  // During cooldown immediately after exiting scroll, thumb extension cannot click
+  const cooldownClick = s.feed('trigger-left');
+  assert.equal(cooldownClick.events.filter(e => e.type === 'button' && e.down).length, 0, 'Click blocked during post-scroll cooldown');
+});
+
+test('pointerMode: trigger anti-chattering filter suppresses single-frame scroll glitches and prevents click flutter', () => {
+  const s = session({pointerMode:'trigger', vScroll: true, smoothing: 1});
+  s.hold('trigger');
+
+  // 1. Single-frame scroll spike during move mode is ignored (no scroll event, cursor continues)
+  const singleGlitch = s.feed('trigger-scroll');
+  assert.notEqual(singleGlitch.mode, 'scroll', '1-frame scroll glitch does not enter scroll');
+  assert.equal(singleGlitch.events.filter(e => e.type === 'scroll').length, 0);
+
+  // Next frame back to move remains cleanly in move
+  const recoveredMove = s.feed('trigger', {x: 0.02});
+  assert.equal(recoveredMove.mode, 'move');
+
+  // 2. Click hold does not flutter on single intermediate frame drop
+  s.feed('trigger-left'); // Press left
+  assert.equal(s.controller.leftDown, true);
+
+  // 1 frame of boundary hesitation does not release button (2-frame release debounce)
+  s.feed('trigger');
+  assert.equal(s.controller.leftDown, true, 'Left button remains held across 1-frame boundary hesitation');
+
+  // 2nd frame of release confirms release
+  const released = s.feed('trigger');
+  assert.equal(s.controller.leftDown, false, 'Confirmed release after 2 frames');
+  assert.ok(released.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
 });

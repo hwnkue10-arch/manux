@@ -4,20 +4,22 @@
 
   # 🖐️ ManuX: Next-Gen AI Vision Air Mouse
 
-  **웹캠과 온디바이스 MediaPipe AI 비전으로 모니터 위에 투명 AR HUD를 띄워 손으로 Windows를 제어하는 차세대 핸즈프리 에어 마우스 시스템**
+  **웹캠과 온디바이스 MediaPipe 비전 + 자체 제작 초경량 공간 신경망(SpatialPoseModel)으로 모니터 위에 투명 AR HUD를 띄워 손으로 Windows를 제어하는 차세대 핸즈프리 에어 마우스 시스템**
 
   <p align="center">
     <img src="https://img.shields.io/badge/Runtime-Node.js_v24-339933?style=flat-square&logo=node.js&logoColor=white" alt="Runtime" />
     <img src="https://img.shields.io/badge/Desktop-Electron_v45-47848F?style=flat-square&logo=electron&logoColor=white" alt="Desktop" />
     <img src="https://img.shields.io/badge/AI_Vision-MediaPipe_Tasks-0078D4?style=flat-square&logo=google&logoColor=white" alt="MediaPipe" />
-    <img src="https://img.shields.io/badge/Language-JavaScript_(ESM)-F7DF1E?style=flat-square&logo=javascript&logoColor=black" alt="JavaScript" />
-    <img src="https://img.shields.io/badge/Native_Driver-PowerShell_%7C_C%23_P%2FInvoke-5391FE?style=flat-square&logo=powershell&logoColor=white" alt="PowerShell" />
+    <img src="https://img.shields.io/badge/Custom_AI_Model-SpatialPoseModel_(Zero--GC)-8A2BE2?style=flat-square" alt="Custom AI Model" />
+    <img src="https://img.shields.io/badge/Trained_Samples-8%2C352_Gold_Dataset-success?style=flat-square" alt="Trained Samples" />
+    <img src="https://img.shields.io/badge/Inference_Speed-0.002ms_(2.6μs)-yellow?style=flat-square" alt="Inference Speed" />
   </p>
   <p align="center">
+    <img src="https://img.shields.io/badge/Native_Driver-PowerShell_%7C_C%23_P%2FInvoke-5391FE?style=flat-square&logo=powershell&logoColor=white" alt="PowerShell" />
     <img src="https://img.shields.io/badge/Win32_API-SendInput_(0x8001_Absolute)-0078D6?style=flat-square&logo=windows&logoColor=white" alt="Win32 API" />
     <img src="https://img.shields.io/badge/Motion_Filter-1€_Filter_%2B_Deadband-E9711C?style=flat-square" alt="1€ Filter" />
     <img src="https://img.shields.io/badge/Platform-Windows_10_%2F_11-0078D6?style=flat-square&logo=windows&logoColor=white" alt="Windows" />
-    <img src="https://img.shields.io/badge/Tests-54_Passed_(100%25)-22c55e?style=flat-square" alt="Tests" />
+    <img src="https://img.shields.io/badge/Tests-92_Passed_(100%25)-22c55e?style=flat-square" alt="Tests" />
     <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="License" />
   </p>
 
@@ -37,18 +39,79 @@
 
 ---
 
+## 🤖 자체 제작 온디바이스 AI 모델: SpatialPoseModel
+
+ManuX는 단순 휴리스틱 기하 공식의 사각지대(카메라 앵글, 손목 회전, 손가락 굵기 편차 등)를 극복하기 위해 **순수 JavaScript 기반 초경량 공간 신경망(SpatialPoseModel)**을 자체 개발하여 탑재했습니다.
+
+```mermaid
+flowchart LR
+    A["웹캠 영상 (60 FPS)"] --> B["MediaPipe Tasks Vision<br/>(21개 3D 관절 추출)"]
+    B --> C["해부학 기하 특징 추출<br/>(76차원 정규화 벡터)"]
+    C --> D["🧠 SpatialPoseModel<br/>(76 -> 64 -> 6 MLP)"]
+    C --> E["3D 기저 정규직교기저<br/>(Gram-Schmidt)"]
+    D --> F["하이브리드 융합 엔진 &<br/>3프레임 시계열 스무딩"]
+    E --> F
+    F --> G["Windows SendInput<br/>(이동 / 클릭 / 스크롤)"]
+```
+
+### 1. 왜 자체 AI 모델을 개발했는가?
+* **실시간 60 FPS 제약 조건**: 기존 무거운 딥러닝 라이브러리(TensorFlow.js, PyTorch IPC 등)는 수십 MB의 번들 용량과 프레임당 5~20ms의 딜레이 및 가비지 컬렉션(GC) 스터터링을 유발합니다.
+* **0-의존성 초저지연 추론**: 순수 JavaScript와 고정 크기 `Float64Array` 정적 버퍼를 사용하여, 가비지 컬렉션 발생량이 **0 Byte(Zero-GC)**이며 프레임당 추론 속도는 **0.0026 ms (2.6 마이크로초)**에 불과합니다. (60 FPS 프레임 예산의 0.015% 미만 소모)
+
+### 2. 신경망 구조 및 특징 (Architecture)
+* **입력층 (76 Features)**:
+  - 손목(0번) 기준 3차원 상대 위치 벡터 (21개 관절 $\times$ 3축 = 63차원, Z축 댐핑 적용)
+  - 5대 손가락 끝 ↔ 손목 거리 비율 (5차원)
+  - 핵심 해부학적 관절 간 이격 거리 및 외전 클리어런스 (엄지-검지, 소지-약지, 중지-검지, 엄지-소지, 엄지-CMC 등 8차원)
+* **은닉층**: 64 Hidden Units (LeakyReLU 활성화 함수, L2 정규화 적용)
+* **출력층**: 6개 액션 클래스 Softmax 확률 분포 (`move`, `left_click`, `right_click`, `both_click`, `scroll`, `idle`)
+
+### 3. 지속적 학습(Continual Learning) 및 검증 지표
+사용자가 `Pose Snapshot Studio`로 수집한 **총 8,352개 실제 손 관절 데이터셋**을 4차에 걸쳐 점진 학습(Continual Training)했습니다.
+
+| 검증 지표 | 달성 수치 | 의미 및 기술적 성과 |
+| :--- | :---: | :--- |
+| **누적 학습 데이터셋** | **8,352개 표본** | 골드 기준 데이터 + 2/3/4차 취약 각도 코너케이스 전수 수집 |
+| **5-Fold 교차 검증** | **97.33%** | 5개 Fold 전 구간(96.95%~97.90%) 균일 성능으로 과적합 완전 배제 |
+| **홀드아웃 테스트 정확도** | **97.91%** | 1,671개 독립 테스트셋 검증 (이동 99.7%, 클릭 98.1~98.5%) |
+| **취약점 코너케이스 정확도** | **96.57%** | 난이도 높은 4차 데이터셋 정확도 급상승 (76.31% ➔ 96.57%) |
+| **단일 프레임 추론 속도** | **0.0026 ms** | 초당 38만 프레임 이상 연산 가능한 초경량 온디바이스 엔진 |
+
+---
+
+## 🛡️ 무결점 채터링 방지 및 상호 배타성 필터 (Zero-Chattering)
+
+에어 마우스 환경에서 가장 빈번하게 발생하는 **미세 떨림(채터링)**과 **스크롤 ↔ 클릭 간섭**을 원천 차단하기 위해 4중 제어 필터를 적용했습니다:
+
+1. **스크롤-클릭 100% 상호 배타성 (Strict Mutual Exclusivity)**:
+   - 엄지 외전(좌클릭) 또는 소지 외전(우클릭)이 감지되면 클릭 제스처로 규정하여 V-Sign 스크롤 판정을 **100% 원천 차단**합니다.
+   - 역으로 스크롤 실행 중에는 모든 마우스 버튼 입력이 완전히 비활성화되어 휠을 굴리는 도중 클릭이 튀는 현상을 원천 방지합니다.
+2. **스크롤 2프레임 진입 검증 (Anti-Spike)**:
+   - 1프레임짜리 순간적 손가락 스파이크 노이즈에는 반응하지 않으며, V-Sign이 2프레임 연속 유지되어야만 스크롤에 진입합니다.
+3. **스크롤 탈출 4프레임 클릭 락아웃 쿨다운 (Post-Scroll Cooldown)**:
+   - V-Sign 스크롤을 마치고 중지를 접어 포인터 모드로 복귀할 때, 손가락이 원래 위치로 돌아오는 **4프레임(~130ms) 동안 모든 클릭 입력을 엄격히 락아웃**합니다.
+4. **시계열 AI 3프레임 롤링 윈도우 스무딩 (Temporal AI Smoothing)**:
+   - 최신 프레임 2.0x 가중치를 둔 3프레임 롤링 윈도우 필터를 통해 단일 프레임 AI 깜빡임(Flicker)을 완벽 흡수합니다.
+
+---
+
 ## 📂 프로젝트 폴더 구조 및 핵심 파일 안내
 
-```
+```text
 manux/
 ├── 📄 package.json                  # 프로젝트 메타데이터, 의존성 및 테스트 스크립트
 ├── 📄 server.js                    # 로컬 정적 서빙 및 개발 서버
 ├── 📄 실행.bat                     # 원클릭 환경 구성 및 앱 실행 스크립트
-├── 📄 README.md                    # 프로젝트 안내 문서
+├── 📄 README.md                    # 프로젝트 종합 안내 문서
+├── 📄 TROUBLESHOOTING.md           # 11개 기술 트러블슈팅 및 데이터 분석 상세 로그
 │
-├── 🧠 src/                          # [핵심] 웹캠 비전 및 에어 마우스 로직
-│   ├── ⭐ air-mouse-controller.js   # 🔥 [핵심 두뇌] 21개 관절 3D 좌표를 분석하여 손 모양/제스처를 판단하는 파일
-│   ├── 📄 mouse-workspace.js        # UI 상호작용, Active Zone(동작 영역) 드래그/리사이즈, 오버레이 상태 관리
+├── 🧠 src/                          # [핵심] 웹캠 비전, 제스처 판정 및 AI 엔진
+│   ├── ⭐ air-mouse-controller.js   # 🔥 [핵심 1: 하이브리드 제어기] 3D 정규직교기저 + AI 판정 융합 + 상호배타/안티채터링 상태머신
+│   ├── ⭐ spatial-pose-model.js     # 🔥 [핵심 2: 공간 자세 AI 모델] 8,352개 표본 기반 순수 JS 초경량 신경망 (0.002ms 추론)
+│   ├── 📁 recorder/                 # [데이터 수집 & 검증 엔진]
+│   │   ├── ⭐ pose-snapshot-studio.js # [자세 표본 스튜디오] 단일/연속 표본 수집, 시스템 판정 vs 정답 대조, 취약 각도 검출
+│   │   └── 📄 raw-temporal-recorder.js # 시계열 원본 연속 프레임 및 라벨 어노테이션 수집 엔진
+│   ├── 📄 mouse-workspace.js        # UI 상호작용, Active Zone 드래그/리사이즈, Studio 및 오버레이 상태 동기화
 │   ├── 📄 app.js                    # 웹캠 비디오 스트림 제어, 60fps 비전 루프, 캔버스 스켈레톤 렌더링
 │   ├── 📄 camera.js                 # 웹캠 해상도(480p/720p/1080p) 및 디바이스 스트림 제약 조건
 │   ├── 📄 vision-client.js          # MediaPipe Tasks Vision 클라이언트 인터페이스
@@ -62,98 +125,87 @@ manux/
 │   └── 📄 windows-mouse.ps1         # Windows C# P/Invoke Win32 SendInput (0x8001 절대 좌표) 네이티브 드라이버
 │
 ├── 🌐 public/                       # 프론트엔드 UI 자산
-│   ├── 📄 index.html                # 설정 대시보드 및 화면 전체 투명 AR HUD 오버레이 뷰
-│   ├── 📄 styles.css                # 반응형 2열 레이아웃, 네온 AR 타겟 및 Active Zone 인터랙티브 스타일
+│   ├── 📄 index.html                # 설정 대시보드, Pose Snapshot Studio 및 화면 전체 투명 AR HUD 오버레이
+│   ├── 📄 styles.css                # 반응형 레이아웃, 슬라이드 스위치, 비교 뱃지, Active Zone 스타일
 │   ├── 📁 assets/                   # SVG 로고 및 그래픽 리소스
 │   └── 📁 models/                   # MediaPipe Tasks Vision 오프라인 모델 (`gesture_recognizer.task`)
 │
-├── 🧪 tests/                        # 자동화 테스트 스위트 (100% 로컬 검증)
-│   ├── 📄 air-mouse-controller.test.js # 손 관절 기하학, 3D 기저, 제스처 상태머신 54개 단위 테스트
-│   ├── 📄 desktop-mouse.test.js     # 데스크톱 IPC 및 SendInput 드라이버 안전성 테스트
+├── 🧪 tests/                        # 자동화 테스트 스위트 (100% 로컬 검증, 총 92개 테스트)
+│   ├── 📄 air-mouse-controller.test.js # 관절 기하학, 3D 기저, 제스처 상태머신, 상호배타성, 채터링 방지 (48개 테스트)
+│   ├── 📄 spatial-pose-model.test.js    # 공간 자세 AI 모델 정확도, 메타데이터, 초저지연 검증 (5개 테스트)
+│   ├── 📄 desktop-mouse.test.js     # 데스크톱 IPC 및 SendInput 드라이버 안전성 (9개 테스트)
+│   ├── 📄 raw-temporal-recorder.test.js # 시계열 원본 프레임 및 이벤트 레코더 (11개 테스트)
+│   ├── 📄 annotation-recorder.test.js   # 인터랙티브 라벨링 및 모드 분리 (9개 테스트)
+│   ├── 📄 pose-snapshot-studio.test.js  # 자세 스냅샷 & 스트림 수집 및 필터링 (10개 테스트)
 │   └── 📁 helpers/                  # 가상 3D 손 관절 합성 픽스처 (`mouse-hand.js`)
 │
-└── 📜 scripts/                      # 빌드/테스트 유틸리티 (`setup.mjs`, `test-desktop-mouse.mjs`)
+└── 📜 scripts/                      # AI 학습 및 빌드 유틸리티
+    ├── 📄 train-spatial-model.mjs   # 8,352개 표본 대상 신경망 학습 및 JS 모델 자동 빌드
+    ├── 📄 cross-validate.mjs        # 5-Fold 교차 검증 파이프라인
+    ├── 📄 setup.mjs                 # 의존성 및 모델 다운로드 자동화
+    └── 📄 test-desktop-mouse.mjs    # 네이티브 드라이버 dry-run 검증
 ```
 
 ---
 
-## 🧠 관절 모양을 보고 판단하는 핵심 파일
-
-> ### ⭐ `src/air-mouse-controller.js`
-> **MediaPipe가 추출한 손의 21개 3D 관절 좌표(`landmarks`)를 실시간으로 넘겨받아 사용자의 손 모양과 제스처를 최종 판단하는 핵심 두뇌 파일입니다.**
-
-### 주요 판단 알고리즘 및 역할:
-1. **3D 손바닥 고유 정규직교기저 (Intrinsic Palm Basis, `L120-170`)**:
-   - 손목(`LM 0`), 중지 너클(`LM 9`), 검지/소지 너클을 그람-슈미트(Gram-Schmidt) 직교화하여 손바닥 고유의 가로축($\vec{u}$), 세로축($\vec{v}$), 법선축($\vec{n}$)을 생성.
-   - 손이 카메라 앞에서 기울어지거나 비틀어져도(Pitch/Yaw) 손바닥 기준의 고유 좌표계를 유지.
-2. **검지 포인터 조준 및 고정 (Cursor Freeze, `L200-230`)**:
-   - 검지 끝(`LM 8`)의 3D 궤적을 추적하며, 검지를 접는 순간(`cos3D < -0.75`) 커서 좌표를 픽셀 단위로 잠금(Freeze).
-3. **엄지 펴기: 좌클릭 & 드래그 (`L235-246`)**:
-   - 엄지 끝(`LM 4`)이 검지/너클로부터 충분히 이탈하고 펴졌는지(`dThumbMCP`, `thCos234`) 판정하여 좌클릭 및 유지 시 드래그 발동.
-4. **소지 펴기: 우클릭 (`L247-272`)**:
-   - 새끼손가락 끝(`LM 20`)이 소지 너클 대비 전진하고 신전되었는지 판정하여 우클릭 발동.
-5. **손바닥(🖐) & V자(✌️) 휠 스크롤 (`L290-305`)**:
-   - 손바닥을 활짝 펴거나 V자를 취하고 위아래로 움직일 때 부드러운 관성 스크롤 발동.
-6. **주먹(✊) 완전 휴식 세이프티 게이트 (`L273-285`)**:
-   - 4개 손가락이 모두 접히고 엄지가 접힌 주먹 상태에서는 모든 클릭 및 이동을 100% 무효화하여 오동작 원천 차단.
-
----
-
-## 🚀 새로운 상호작용 패러다임 (Core Paradigm)
+## 🚀 사용자 인터랙션 패러다임 (Core Paradigm)
 
 ### 1. 모니터 투명 HUD 오버레이 (아이 트래커 방식)
-* 작은 웹캠 창을 쳐다볼 필요 없이, **모니터 화면 전체에 검지(LM 8)·엄지(LM 4)·소지(LM 20)·중지(LM 12) 네온 AR 포인트가 직접 오버레이**됩니다.
-* Electron의 `setIgnoreMouseEvents(true, { forward: true })` 기술로 웹서핑, 문서 편집, 게임 등 모든 Windows 프로그램 위에서 투명하게 클릭이 관통됩니다.
+* 작은 웹캠 창을 볼 필요 없이, **모니터 화면 전체에 검지(LM 8)·엄지(LM 4)·소지(LM 20) 네온 AR 포인트가 직접 오버레이**됩니다.
+* Electron의 `setIgnoreMouseEvents(true, { forward: true })` 기술로 웹서핑, 게임, 문서 편집 등 모든 Windows 프로그램 위에서 투명하게 클릭이 관통됩니다.
 
 ### 2. 가상 동작 영역 (Active Zone) 1:1 확대 투영
-* 웹캠 화면 전체를 쓰면 화면 하단(작업 표시줄)으로 갈 때 손목이 카메라 밖으로 이탈합니다.
-* 카메라 화면 상단에 **모니터 비율의 직사각형(Active Zone)**을 띄우고, 손이 이 작은 박스 안에서만 움직여도 Windows 모니터 전체(0~100%)에 도달할 수 있도록 정방향 확대 매핑을 제공합니다.
+* 화면 하단(작업 표시줄)으로 이동할 때 손목이 카메라 밖으로 이탈하지 않도록 카메라 상단에 **모니터 비율의 직사각형(Active Zone)**을 배치합니다.
 * 사용자가 프리뷰 화면에서 마우스로 네모 박스를 직접 잡고 드래그하거나 모서리를 끌어 크기를 리사이즈할 수 있습니다.
-
-### 3. 신형 트리거 모드 (Trigger Paradigm)
-* **포인터 이동 (검지)**: 검지 끝(`LM 8`)을 직접 추적하며, 검지를 접으면 그 자리에 커서가 고정(Freeze)됩니다.
-* **좌클릭 & 드래그 (엄지)**: 검지로 조준한 상태에서 엄지만 펴면 즉시 좌클릭되며, 유지하면 드래그가 됩니다. 검지를 접고 엄지를 펴면 흔들림 0% 정밀 클릭이 가능합니다.
-* **우클릭 (소지)**: 새끼손가락만 펴면 우클릭이 발동되며, 엄지와 소지를 동시에 펴면 좌우 동시 클릭이 지원됩니다.
-* **휠 스크롤 (손바닥/V자)**: 손바닥(🖐) 또는 V자(✌️)를 펴고 손을 위아래로 그으면 부드럽게 휠 스크롤됩니다.
-* **휴식 (주먹)**: 주먹을 쥐면 모든 추적과 입력이 정지되는 안전 휴식 상태가 됩니다.
 
 ---
 
-## 🎮 제스처 조작 표 (Gesture Cheatsheet)
+## 🎮 제스처 조작 표 (Trigger 모드 기준)
 
 | 제스처 | HUD 시각 피드백 | 기능 | 상세 동작 및 생체역학 |
 | :---: | :---: | :---: | :--- |
-| **👆 검지 조준** | 청록색(Cyan) 조준링 & 십자선 | **커서 이동 (접으면 고정)** | 검지 끝(LM 8) 직접 추적, 접으면 커서 위치 고정(Lock) |
+| **👆 검지 조준** | 청록색(Cyan) 조준링 & 십자선 | **커서 이동** | 검지 끝(LM 8) 직접 추적, 접으면 커서 위치 고정(Lock) |
 | **👍 엄지 펴기** | 호박색(Amber) 레이저 링 | **좌클릭 & 연속 드래그** | 엄지 펴면 즉시 좌클릭, 유지 시 드래그 (조준 흔들림 0%) |
-| **🤙 소지 펴기** | 인디고(Indigo) 레이저 링 | **우클릭** | 새끼손가락만 펴면 우클릭 (엄지+소지 동시 펴기 지원) |
-| **🖐️ 손바닥 / ✌️ V자** | 보라색(Purple) 나침반 가이드 | **휠 스크롤** | 손바닥 또는 V자 펴고 위/아래 이동 시 휠 스크롤 |
-| **✊ 주먹 (Fist)** | 오버레이 소멸 (Idle) | **완전 휴식 (Safety Gate)** | 주먹을 쥐면 모든 클릭/이동 100% 무효화 |
+| **🤙 소지 펴기** | 인디고(Indigo) 레이저 링 | **우클릭** | 새끼손가락만 외측으로 펴면 즉시 우클릭 |
+| **👐 엄지+소지 펴기** | 호박색 + 인디고 동시 점등 | **동시 클릭 (Both Click)** | 엄지와 새끼손가락을 동시에 펼쳐 양쪽 클릭 동시 실행 |
+| **✌️ V자 (Peace)** | 보라색(Purple) 나침반 가이드 | **휠 스크롤 (단독 모드)** | 검지+중지 펴고 위/아래 이동 시 부드러운 관성 스크롤 |
+| **🖐️ 손바닥 (Open Palm)** | 오버레이 소멸 (Idle) | **안전 휴식 (Safety Rest)** | 손바닥을 활짝 펴면 모든 클릭/스크롤 차단 후 대기 |
+| **✊ 주먹 (Fist)** | 오버레이 소멸 (Idle) | **완전 휴식 (Safety Gate)** | 5손가락을 모두 접은 주먹 상태에서는 모든 제어 무효화 |
 
 ---
 
 ## ⌨️ 단축키 안내 (Keyboard Shortcuts & Hotkeys)
 
-| 단축키 | 적용 범위 | 설명 |
+| 단축키 | 적용 화면 | 기능 설명 |
 | :--- | :--- | :--- |
-| **`F11`** | 앱 창 및 오버레이 | **화면 투명 HUD 오버레이 모드 토글** (모니터 전체 화면 AR 모드) |
-| **`Esc`** | 앱 및 오버레이 | **일반 창 모드로 복귀** / 마우스 제어 일시 중지 |
-| **`Ctrl + Alt + M`** | **Windows 전체 (글로벌)** | **비상 제어 중지 (Emergency Stop)** (어떤 프로그램 실행 중에도 즉시 마우스 권한 해제) |
+| **`Space`** | 메인 화면 (Studio) | **자세 표본 1프레임 캡처** 또는 **영상 연속 수집 시작/중지** |
+| **`Backspace`** | 메인 화면 (Studio) | **직전 캡처 표본 즉시 삭제 (Undo)** |
+| **`Tab`** | 메인 화면 (Studio) | **지정할 정답 자세 순환 변경** (`move` ➔ `left_click` ➔ `right_click` ...) |
+| **`1` ~ `6`** | 메인 화면 (Studio) | **정답 자세 직접 선택** (1: 이동, 2: 좌클릭, 3: 우클릭, 4: 동시클릭, 5: 스크롤, 6: 휴식) |
+| **`F8`** | 메인 화면 | **시계열 원본 세션 녹화 시작/중지** (`RawTemporalRecorder`) |
+| **`F11`** | 전체 화면 | **모니터 전체 투명 HUD 오버레이 모드 토글** |
+| **`Esc`** | 전체 화면 | **설정 대시보드로 복귀** / 마우스 제어 일시 중지 |
+| **`Ctrl + Alt + M`** | **Windows 전체 (글로벌)** | **비상 제어 중지 (Emergency Stop)** (어떤 상황에서도 즉시 제어권 강제 회수) |
 
 ---
 
 ## 🧪 테스트 및 품질 검증
 
 ```powershell
-# 단위 테스트 (AirMouseController 54개 테스트 통과)
+# 전체 단위 및 통합 테스트 (92개 테스트 100% 통과)
 npm test
 
 # Windows 네이티브 SendInput 드라이버 안전성 검증 (dry-run 모드)
 npm run test:native
+
+# 8,352개 전수 데이터셋 5-Fold 교차 검증
+npm run test:cv
 ```
 
 ---
 
 ## 🔒 개인정보 및 보안 원칙
 
-* **100% 로컬 오프라인 처리**: 웹캠 영상과 손 관절 좌표는 외부 서버로 전송되지 않으며 사용자 PC 메모리 내에서만 실시간 처리 후 소멸됩니다.
+* **100% 로컬 오프라인 처리**: 웹캠 영상과 손 관절 좌표는 외부 서버로 일절 전송되지 않으며, 사용자 PC 메모리 내에서만 실시간 처리 후 소멸됩니다.
 * **비상 정지 보장**: `Ctrl + Alt + M` 글로벌 단축키는 언제든 즉시 시스템 제어권을 회수하며, 앱 비정상 종료 시 네이티브 드라이버가 누른 상태의 모든 마우스 버튼을 즉각 릴리즈합니다.
+* **지속 가능한 투명 개발**: 지금까지의 세부 트러블슈팅과 3D 해부학 역학 공식, AI 모델 구조는 [TROUBLESHOOTING.md](TROUBLESHOOTING.md)에 상세히 기록되어 있습니다.

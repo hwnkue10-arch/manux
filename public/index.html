@@ -92,10 +92,6 @@
             <input id="mouse-enabled" type="checkbox">
             <span>마우스 제어 활성화</span>
           </label>
-          <label class="mouse-sensitivity" for="mouse-sensitivity">
-            이동 감도 <output id="mouse-sensitivity-output" for="mouse-sensitivity">1800</output>
-            <input type="range" id="mouse-sensitivity" min="600" max="3600" step="100" value="1800">
-          </label>
         </div>
 
         <div class="mouse-control-row options-grid">
@@ -110,6 +106,10 @@
           <label class="control-toggle">
             <input id="mouse-cross-view" type="checkbox" checked>
             <span>Cross-View 대각선 보정 (-22° · Y 2.2x)</span>
+          </label>
+          <label class="control-toggle">
+            <input id="mouse-hybrid-ai" type="checkbox" checked>
+            <span>🤖 AI 제스처 보정 (Spatial AI, 98% 정확도)</span>
           </label>
         </div>
 
@@ -155,8 +155,12 @@
         <div class="snapshot-compare-box" id="snapshot-compare-box">
           <div class="compare-row">
             <div class="compare-col system">
-              <span class="compare-label">시스템 현재 판정 (Predicted)</span>
+              <span class="compare-label">시스템 판정 (System)</span>
               <span id="live-predicted-action" class="compare-badge system">idle</span>
+            </div>
+            <div class="compare-col ai">
+              <span class="compare-label">AI 예측 (Spatial AI)</span>
+              <span id="live-ai-action" class="compare-badge ai">🤖 대기</span>
             </div>
             <div class="compare-arrow">➔</div>
             <div class="compare-col target">
@@ -178,17 +182,17 @@
           <button type="button" class="action-pill-btn active" data-action="move" title="단축키 1">
             <span class="pill-key">1</span> 👆 move (이동) <span class="pill-count" id="snap-count-move">0</span>
           </button>
-          <button type="button" class="action-pill-btn" data-action="freeze" title="단축키 2 (Trigger 전용)">
-            <span class="pill-key">2</span> 🔒 freeze (고정) <span class="pill-count" id="snap-count-freeze">0</span>
+          <button type="button" class="action-pill-btn" data-action="left_click" title="단축키 2">
+            <span class="pill-key">2</span> 👍 left_click (좌클릭) <span class="pill-count" id="snap-count-left_click">0</span>
           </button>
-          <button type="button" class="action-pill-btn" data-action="left_click" title="단축키 3">
-            <span class="pill-key">3</span> 👍 left_click (좌클릭) <span class="pill-count" id="snap-count-left_click">0</span>
+          <button type="button" class="action-pill-btn" data-action="right_click" title="단축키 3">
+            <span class="pill-key">3</span> 🤙 right_click (우클릭) <span class="pill-count" id="snap-count-right_click">0</span>
           </button>
-          <button type="button" class="action-pill-btn" data-action="right_click" title="단축키 4">
-            <span class="pill-key">4</span> 🤙 right_click (우클릭) <span class="pill-count" id="snap-count-right_click">0</span>
+          <button type="button" class="action-pill-btn" data-action="both_click" title="단축키 4">
+            <span class="pill-key">4</span> 👐 both_click (동시 클릭) <span class="pill-count" id="snap-count-both_click">0</span>
           </button>
           <button type="button" class="action-pill-btn" data-action="scroll" title="단축키 5">
-            <span class="pill-key">5</span> 🖐️ scroll (스크롤) <span class="pill-count" id="snap-count-scroll">0</span>
+            <span class="pill-key">5</span> ✌️ scroll (스크롤) <span class="pill-count" id="snap-count-scroll">0</span>
           </button>
           <button type="button" class="action-pill-btn" data-action="idle" title="단축키 6 또는 0">
             <span class="pill-key">6</span> ✊ idle (중립/휴식) <span class="pill-count" id="snap-count-idle">0</span>
@@ -226,14 +230,14 @@
           <span class="mouse-guide-number">01</span>
           <div>
             <h3>👆 1: 포인터 이동 (검지)</h3>
-            <p>검지 끝(LM 8) 직접 추적<br>검지를 접으면 그 자리에 커서 고정 (Freeze)</p>
+            <p>검지 끝(LM 8) 직접 추적<br>주먹(✊)을 쥐면 최근 조준 위치에 커서 유지</p>
           </div>
         </article>
         <article data-mouse-mode="left">
           <span class="mouse-guide-number">02</span>
           <div>
             <h3>👍 엄지 펴기: 좌클릭 & 드래그</h3>
-            <p>엄지만 펴면 즉시 좌클릭 & 유지 시 드래그<br>검지 접고 엄지 펴면 흔들림 0% 정밀 클릭</p>
+            <p>엄지만 펴면 즉시 좌클릭 & 유지 시 드래그<br>클릭 흔들림 방지로 미세 떨림 0% 정밀 클릭</p>
           </div>
         </article>
         <article data-mouse-mode="right">

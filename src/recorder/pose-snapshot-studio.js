@@ -12,13 +12,21 @@
  * 5. Full reproducibility: Preserves 21 raw 3D landmarks, geometry gate states, and timestamps.
  */
 
+export function normalizeActionId(mode) {
+  if (mode === 'left') return 'left_click';
+  if (mode === 'right') return 'right_click';
+  if (mode === 'both') return 'both_click';
+  if (mode === 'frozen') return 'move';
+  return mode || 'idle';
+}
+
 export const SUPPORTED_ACTIONS = [
-  { id: 'move', key: '1', label: 'move (포인터 이동)', icon: '👆', desc: '손바닥을 안정적으로 유지하며 커서를 부드럽게 이동하는 자세', modes: ['trigger', 'index'] },
-  { id: 'freeze', key: '2', label: 'freeze (포인터 고정)', icon: '🔒', desc: '검지를 접어 커서 위치를 고정하는 자세 (Trigger 모드 전용)', modes: ['trigger'] },
-  { id: 'left_click', key: '3', label: 'left_click (좌클릭)', icon: '👍', desc: 'Trigger: 엄지 펴기 / Index: 엄지-검지 핀치', modes: ['trigger', 'index'] },
-  { id: 'right_click', key: '4', label: 'right_click (우클릭)', icon: '🤙', desc: 'Trigger: 새끼손가락 펴기 / Index: 엄지-약지 터치', modes: ['trigger', 'index'] },
-  { id: 'scroll', key: '5', label: 'scroll (휠 스크롤)', icon: '🖐️', desc: 'Trigger: 손바닥(🖐️) 또는 V자(✌️) 펴기 / Index: 스와이프 자세', modes: ['trigger', 'index'] },
-  { id: 'idle', key: '6', label: 'idle (중립/휴식)', icon: '✊', desc: '마우스 제어 동작을 하지 않는 편안한 휴식 또는 주먹 자세', modes: ['trigger', 'index'] },
+  { id: 'move', key: '1', label: 'move (포인터 이동)', icon: '👆', desc: '검지를 펴고 커서를 부드럽게 이동하는 자세', modes: ['trigger', 'index'] },
+  { id: 'left_click', key: '2', label: 'left_click (좌클릭 유지)', icon: '👍', desc: 'Trigger: 엄지 펴서 유지 / Index: 엄지-검지 핀치', modes: ['trigger', 'index'] },
+  { id: 'right_click', key: '3', label: 'right_click (우클릭 유지)', icon: '🤙', desc: 'Trigger: 새끼손가락 펴서 유지 / Index: 엄지-약지 터치', modes: ['trigger', 'index'] },
+  { id: 'both_click', key: '4', label: 'both_click (좌우 동시 클릭)', icon: '👐', desc: 'Trigger: 엄지 + 새끼손가락 동시 펴기', modes: ['trigger', 'index'] },
+  { id: 'scroll', key: '5', label: 'scroll (휠 스크롤)', icon: '✌️', desc: 'Trigger: 검지+중지 V자(✌️) 펴기 / Index: 스와이프 자세', modes: ['trigger', 'index'] },
+  { id: 'idle', key: '6', label: 'idle (중립/휴식)', icon: '✊', desc: '마우스 제어를 하지 않는 주먹(✊) 또는 활짝 편 손바닥(🖐️) 휴식', modes: ['trigger', 'index'] },
 ];
 
 export class PoseSnapshotStudio {
@@ -151,7 +159,7 @@ export class PoseSnapshotStudio {
     // 4. Extract Controller prediction
     let predictedAction = 'idle';
     if (geometryState && typeof geometryState === 'object') {
-      predictedAction = geometryState.mode || 'idle';
+      predictedAction = normalizeActionId(geometryState.mode || 'idle');
     }
 
     // Determine whether this sample is a match (normal verified sample) or discrepancy (geometry failure sample)
@@ -242,7 +250,7 @@ export class PoseSnapshotStudio {
     // 3. Extract Controller prediction
     let predictedAction = 'idle';
     if (geometryState && typeof geometryState === 'object') {
-      predictedAction = geometryState.mode || 'idle';
+      predictedAction = normalizeActionId(geometryState.mode || 'idle');
     }
     const isMatch = (predictedAction === groundTruthAction);
 
