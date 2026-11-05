@@ -59,7 +59,7 @@ test('RawTemporalRecorder: records 21 raw landmarks precisely and calculates dt'
     quality: { ok: true, spanPx: 120 },
     mode: 'trigger',
     geometryState: { mode: 'move', phase: 'active', activePos: { x: 0.3, y: 0.4 } },
-    events: [{ type: 'moveTo', x: 0.3, y: 0.4 }],
+    controllerEvents: [{ type: 'moveTo', x: 0.3, y: 0.4 }],
   });
 
   assert.equal(frame1.frameId, 1);
@@ -71,8 +71,8 @@ test('RawTemporalRecorder: records 21 raw landmarks precisely and calculates dt'
   assert.equal(frame1.rawLandmarks.length, 21);
   assert.equal(frame1.rawLandmarks[0].x, 0.3);
   assert.equal(frame1.rawLandmarks[0].y, 0.4);
-  assert.equal(frame1.actualMouseEvents.length, 1);
-  assert.equal(frame1.actualMouseEvents[0].type, 'moveTo');
+  assert.equal(frame1.controllerEvents.length, 1);
+  assert.equal(frame1.controllerEvents[0].type, 'moveTo');
 
   const lm2 = createDummyLandmarks(0.31, 0.41);
   const frame2 = recorder.recordFrame({
@@ -81,7 +81,7 @@ test('RawTemporalRecorder: records 21 raw landmarks precisely and calculates dt'
     quality: true,
     mode: 'trigger',
     geometryState: { mode: 'left', gates: { thumbExtended: true } },
-    events: [{ type: 'button', button: 'left', down: true }],
+    controllerEvents: [{ type: 'button', button: 'left', down: true }],
   });
 
   assert.equal(frame2.frameId, 2);
@@ -89,8 +89,8 @@ test('RawTemporalRecorder: records 21 raw landmarks precisely and calculates dt'
   assert.ok(Math.abs(frame2.dt - 0.033333) < 0.0001);
   assert.equal(frame2.geometryState.mode, 'left');
   assert.equal(frame2.geometryState.gates.thumbExtended, true);
-  assert.equal(frame2.actualMouseEvents[0].button, 'left');
-  assert.equal(frame2.actualMouseEvents[0].down, true);
+  assert.equal(frame2.controllerEvents[0].button, 'left');
+  assert.equal(frame2.controllerEvents[0].down, true);
 });
 
 test('RawTemporalRecorder: tracking failure records rawLandmarks as null without synthetic values', () => {
@@ -112,7 +112,7 @@ test('RawTemporalRecorder: tracking failure records rawLandmarks as null without
     quality: { ok: false, reason: 'hand-too-small' },
     mode: 'trigger',
     geometryState: { mode: 'idle', phase: 'invalid' },
-    events: [{ type: 'release' }],
+    controllerEvents: [{ type: 'release' }],
   });
 
   assert.equal(frame2.frameId, 2);
@@ -120,13 +120,62 @@ test('RawTemporalRecorder: tracking failure records rawLandmarks as null without
   assert.equal(frame2.tracking.quality.ok, false);
   assert.equal(frame2.tracking.quality.reason, 'hand-too-small');
   assert.equal(frame2.rawLandmarks, null);
-  assert.equal(frame2.actualMouseEvents[0].type, 'release');
+  assert.equal(frame2.controllerEvents[0].type, 'release');
 
   const session = recorder.stop();
   assert.equal(session.summary.totalFrames, 2);
   assert.equal(session.summary.trackedFrames, 1);
   assert.equal(session.summary.droppedFrames, 1);
   assert.equal(session.summary.trackingRatio, 0.5);
+});
+
+test('RawTemporalRecorder: tracking recovery preserves temporal continuity and dt accurately', () => {
+  const recorder = new RawTemporalRecorder();
+  recorder.start({ mode: 'trigger' });
+
+  // Frame 1: Tracked at t = 1000
+  const f1 = recorder.recordFrame({ timestamp: 1000, landmarks: createDummyLandmarks() });
+  assert.equal(f1.dt, 0);
+
+  // Frame 2: Tracking loss at t = 1033.33
+  const f2 = recorder.recordFrame({ timestamp: 1033.33, landmarks: null, quality: { ok: false, reason: 'no-hand' } });
+  assert.ok(Math.abs(f2.dt - 0.03333) < 0.0001);
+  assert.equal(f2.tracking.tracked, false);
+
+  // Frame 3: Tracking recovery at t = 1066.66
+  const f3 = recorder.recordFrame({ timestamp: 1066.66, landmarks: createDummyLandmarks() });
+  assert.ok(Math.abs(f3.dt - 0.03333) < 0.0001);
+  assert.equal(f3.tracking.tracked, true);
+  assert.equal(f3.rawLandmarks.length, 21);
+});
+
+test('RawTemporalRecorder: distinguishes controllerEvents from OS dispatch state', () => {
+  const recorder = new RawTemporalRecorder();
+  recorder.start({ mode: 'trigger' });
+
+  // Frame with controller event, but mouse control is disabled
+  const f1 = recorder.recordFrame({
+    timestamp: 1000,
+    landmarks: createDummyLandmarks(),
+    controllerEvents: [{ type: 'moveTo', x: 0.5, y: 0.5 }],
+    dispatch: { mouseEnabled: false, paused: false, bridgeSent: false },
+  });
+
+  assert.equal(f1.controllerEvents.length, 1);
+  assert.equal(f1.dispatch.mouseEnabled, false);
+  assert.equal(f1.dispatch.bridgeSent, false);
+
+  // Frame with controller event, mouse control is active and dispatched
+  const f2 = recorder.recordFrame({
+    timestamp: 1033,
+    landmarks: createDummyLandmarks(),
+    controllerEvents: [{ type: 'button', button: 'left', down: true }],
+    dispatch: { mouseEnabled: true, paused: false, bridgeSent: true },
+  });
+
+  assert.equal(f2.controllerEvents[0].button, 'left');
+  assert.equal(f2.dispatch.mouseEnabled, true);
+  assert.equal(f2.dispatch.bridgeSent, true);
 });
 
 test('RawTemporalRecorder: separates Trigger mode and Index mode metadata and frames', () => {
@@ -160,7 +209,7 @@ test('RawTemporalRecorder: toJSONL() produces valid JSON Lines format', () => {
     landmarks: createDummyLandmarks(),
     mode: 'trigger',
     geometryState: { mode: 'move' },
-    events: [{ type: 'moveTo', x: 0.5, y: 0.5 }],
+    controllerEvents: [{ type: 'moveTo', x: 0.5, y: 0.5 }],
   });
 
   recorder.recordFrame({
@@ -183,6 +232,7 @@ test('RawTemporalRecorder: toJSONL() produces valid JSON Lines format', () => {
   assert.equal(frame1.type, 'frame');
   assert.equal(frame1.frameId, 1);
   assert.equal(frame1.rawLandmarks.length, 21);
+  assert.equal(frame1.controllerEvents.length, 1);
 
   const frame2 = JSON.parse(lines[2]);
   assert.equal(frame2.type, 'frame');
@@ -196,17 +246,57 @@ test('RawTemporalRecorder: toJSONL() produces valid JSON Lines format', () => {
   assert.equal(summary.droppedFrames, 1);
 });
 
-test('RawTemporalRecorder: maxFrames limit halts recording safely', () => {
-  const recorder = new RawTemporalRecorder({ maxFrames: 3 });
+test('RawTemporalRecorder: maxFrames limit preserves boundary frame and stops recording', () => {
+  // maxFrames = 3
+  const recorder = new RawTemporalRecorder({ maxFrames: 3, autoDownload: false });
   recorder.start({ mode: 'trigger' });
 
-  assert.ok(recorder.recordFrame({ timestamp: 10, landmarks: createDummyLandmarks() }));
-  assert.ok(recorder.recordFrame({ timestamp: 20, landmarks: createDummyLandmarks() }));
-  assert.ok(recorder.recordFrame({ timestamp: 30, landmarks: createDummyLandmarks() }));
+  const f1 = recorder.recordFrame({ timestamp: 10, landmarks: createDummyLandmarks() });
+  const f2 = recorder.recordFrame({ timestamp: 20, landmarks: createDummyLandmarks() });
+  assert.equal(recorder.recording, true);
 
-  // 4th frame exceeds maxFrames
-  const overflowFrame = recorder.recordFrame({ timestamp: 40, landmarks: createDummyLandmarks() });
-  assert.equal(overflowFrame, null);
-  assert.equal(recorder.recording, false);
-  assert.equal(recorder.buffer.length, 3);
+  // 3rd frame reaches maxFrames: MUST be preserved in buffer!
+  const f3 = recorder.recordFrame({ timestamp: 30, landmarks: createDummyLandmarks() });
+  assert.ok(f3, '3rd boundary frame must be recorded and returned');
+  assert.equal(f3.frameId, 3);
+  assert.equal(recorder.buffer.length, 3, 'All 3 frames must be in buffer');
+  assert.equal(recorder.recording, false, 'Recording must stop after reaching limit');
+
+  // 4th frame attempted after stopping: must return null and not modify buffer
+  const f4 = recorder.recordFrame({ timestamp: 40, landmarks: createDummyLandmarks() });
+  assert.equal(f4, null);
+  assert.equal(recorder.buffer.length, 3, 'Buffer length remains exactly 3');
+});
+
+test('RawTemporalRecorder: non-browser environment safely preserves data if download attempted', () => {
+  const recorder = new RawTemporalRecorder();
+  recorder.start({ mode: 'trigger' });
+  recorder.recordFrame({ timestamp: 100, landmarks: createDummyLandmarks() });
+  recorder.stop();
+
+  // In Node test environment, document/Blob are not standard DOM elements
+  const res = recorder.downloadJSONL();
+  // downloadJSONL should safely return false without throwing
+  assert.equal(res, false);
+  // Crucially, memory buffer must be completely intact!
+  assert.equal(recorder.buffer.length, 1);
+  assert.ok(recorder.toJSONL().includes('"type":"header"'));
+});
+
+test('RawTemporalRecorder: new session resets all state with zero temporal leakage', () => {
+  const recorder = new RawTemporalRecorder();
+  recorder.start({ mode: 'trigger' });
+  recorder.recordFrame({ timestamp: 5000, landmarks: createDummyLandmarks() });
+  recorder.recordFrame({ timestamp: 5033, landmarks: createDummyLandmarks() });
+  const s1 = recorder.stop();
+  assert.equal(s1.totalFrames, 2);
+
+  // Restart session at completely different time
+  recorder.start({ mode: 'index' });
+  assert.equal(recorder.frameCount, 0);
+  assert.equal(recorder.buffer.length, 0);
+
+  const fNew = recorder.recordFrame({ timestamp: 10000, landmarks: createDummyLandmarks() });
+  assert.equal(fNew.frameId, 1);
+  assert.equal(fNew.dt, 0, 'First frame of new session must have dt = 0, never (10000 - 5033)');
 });

@@ -117,6 +117,12 @@ function processResult(packet, now, roundTripMs) {
     landmarks,
     now,
     quality: mouseQualityOk,
+    qualityDetail: {
+      ok: mouseQualityOk,
+      handPresent,
+      spanPx: quality.spanPx,
+      reason: quality.reason || (handPresent ? null : 'no-hand'),
+    },
     handedness,
     ...dimensions,
     latency: roundTripMs,

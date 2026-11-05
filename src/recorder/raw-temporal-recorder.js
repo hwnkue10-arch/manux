@@ -2,20 +2,22 @@
  * RawTemporalRecorder (ManuX Temporal Gesture Recorder)
  * 
  * Captures raw, unadulterated time-series hand tracking data (landmarks, timestamps,
- * geometry states, OS mouse events) for offline TCN intent training.
+ * geometry states, controller-requested mouse events) for offline TCN intent training.
  *
  * Core Principles:
  * 1. Zero overhead when inactive (single boolean check).
  * 2. Never invents synthetic coordinates for dropped/lost frames (preserves raw ground truth).
  * 3. Exact monotonically increasing timestamp & empirical dt calculation.
- * 4. Structured JSONL export without blocking UI frames.
+ * 4. Clear distinction: controllerEvents (gesture engine commands) vs verified OS events.
+ * 5. Strict data preservation upon reaching maxFrames limit.
  */
 
 export class RawTemporalRecorder {
-  constructor({ maxFrames = 15000, onChunk = null, chunkSize = 1000 } = {}) {
+  constructor({ maxFrames = 15000, onChunk = null, chunkSize = 1000, autoDownload = true } = {}) {
     this.maxFrames = Number.isFinite(maxFrames) && maxFrames > 0 ? maxFrames : 15000;
     this.onChunk = typeof onChunk === 'function' ? onChunk : null;
     this.chunkSize = chunkSize;
+    this.autoDownload = Boolean(autoDownload);
 
     this.recording = false;
     this.sessionId = null;
@@ -26,10 +28,11 @@ export class RawTemporalRecorder {
     this.droppedCount = 0;
     this.buffer = [];
     this.metadata = null;
+    this.summary = null;
   }
 
   /**
-   * Start a new recording session.
+   * Start a new recording session. Resets all temporal and buffer counters.
    */
   start({ mode = 'trigger', width = 640, height = 480, metadata = {} } = {}) {
     const now = Date.now();
@@ -42,6 +45,7 @@ export class RawTemporalRecorder {
     this.trackedCount = 0;
     this.droppedCount = 0;
     this.buffer = [];
+    this.summary = null;
 
     this.metadata = {
       sessionId: this.sessionId,
@@ -58,7 +62,7 @@ export class RawTemporalRecorder {
   }
 
   /**
-   * Record a single frame. Must be sub-millisecond when active, and virtually 0ms when inactive.
+   * Record a single frame. Sub-millisecond execution when active; 0ms when inactive.
    */
   recordFrame({
     timestamp = performance.now(),
@@ -66,19 +70,13 @@ export class RawTemporalRecorder {
     quality = true,
     mode = 'trigger',
     geometryState = null,
-    events = null,
+    controllerEvents = null,
+    dispatch = null,
     actionIntent = null,
   } = {}) {
     if (!this.recording) return null;
 
-    // Safety: prevent unbounded memory leak if user forgets to stop
-    if (this.buffer.length >= this.maxFrames) {
-      console.warn(`[RawTemporalRecorder] Reached maxFrames limit (${this.maxFrames}). Stopping recording.`);
-      this.stop();
-      return null;
-    }
-
-    // Exact empirical dt calculation
+    // Exact empirical dt calculation from prior recorded frame
     const numTimestamp = Number.isFinite(timestamp) ? timestamp : performance.now();
     const dt = this.lastTimestamp !== null
       ? Math.max(0, Number(((numTimestamp - this.lastTimestamp) / 1000).toFixed(6)))
@@ -110,8 +108,18 @@ export class RawTemporalRecorder {
 
     // Parse quality detail
     const qualityRecord = typeof quality === 'object' && quality !== null
-      ? { ok: Boolean(quality.ok), spanPx: quality.spanPx ?? null, reason: quality.reason ?? null }
-      : { ok: Boolean(quality), spanPx: null, reason: null };
+      ? {
+          ok: Boolean(quality.ok),
+          handPresent: quality.handPresent !== undefined ? Boolean(quality.handPresent) : handTracked,
+          spanPx: quality.spanPx ?? null,
+          reason: quality.reason ?? (handTracked ? null : 'no-hand'),
+        }
+      : {
+          ok: Boolean(quality),
+          handPresent: handTracked,
+          spanPx: null,
+          reason: handTracked ? null : 'no-hand',
+        };
 
     // Capture geometry controller state snapshot
     let geom = null;
@@ -127,9 +135,9 @@ export class RawTemporalRecorder {
       };
     }
 
-    // Capture actual emitted OS mouse events
-    const mouseEvents = Array.isArray(events) && events.length > 0
-      ? events.map(ev => ({ ...ev }))
+    // Capture controller-requested mouse commands (NOT verified OS driver events)
+    const reqEvents = Array.isArray(controllerEvents) && controllerEvents.length > 0
+      ? controllerEvents.map(ev => ({ ...ev }))
       : [];
 
     const record = {
@@ -145,10 +153,12 @@ export class RawTemporalRecorder {
       },
       rawLandmarks,
       geometryState: geom,
-      actualMouseEvents: mouseEvents,
+      controllerEvents: reqEvents,
+      dispatch: dispatch ? { ...dispatch } : null,
       actionIntent: actionIntent || null,
     };
 
+    // Push the frame FIRST to preserve the N-th boundary frame!
     this.buffer.push(record);
 
     // Optional chunking callback for streaming pipelines
@@ -160,20 +170,32 @@ export class RawTemporalRecorder {
       }
     }
 
+    // Check maxFrames safety limit: finalize, preserve data, and auto-download if configured
+    if (this.buffer.length >= this.maxFrames) {
+      this.stop();
+      if (this.autoDownload) {
+        try {
+          this.downloadJSONL();
+        } catch (e) {
+          console.warn('[RawTemporalRecorder] Auto-download failed or skipped in non-browser environment; data preserved in buffer:', e);
+        }
+      }
+    }
+
     return record;
   }
 
   /**
-   * Stop recording and finalize session metadata.
+   * Stop recording and finalize session metadata. Buffer is never cleared.
    */
   stop() {
-    if (!this.recording) return null;
+    if (!this.recording) return this.summary ? { sessionId: this.sessionId, metadata: this.metadata, summary: this.summary, totalFrames: this.frameCount, frames: this.buffer } : null;
 
     this.recording = false;
     const endedAt = new Date().toISOString();
     const durationMs = this.startTime !== null ? performance.now() - this.startTime : 0;
 
-    const summary = {
+    this.summary = {
       sessionId: this.sessionId,
       startedAt: this.metadata?.startedAt,
       endedAt,
@@ -188,7 +210,7 @@ export class RawTemporalRecorder {
     return {
       sessionId: this.sessionId,
       metadata: this.metadata,
-      summary,
+      summary: this.summary,
       totalFrames: this.frameCount,
       frames: this.buffer,
     };
@@ -196,9 +218,6 @@ export class RawTemporalRecorder {
 
   /**
    * Serialize recorded session into standard JSON Lines (JSONL).
-   * Line 1: Session Header
-   * Line 2..N: Frame Records
-   * Line N+1: Session Summary
    */
   toJSONL() {
     const lines = [];
@@ -220,7 +239,7 @@ export class RawTemporalRecorder {
     lines.push(JSON.stringify({
       type: 'summary',
       sessionId: this.sessionId,
-      endedAt: new Date().toISOString(),
+      endedAt: this.summary?.endedAt || new Date().toISOString(),
       totalFrames: this.frameCount,
       trackedFrames: this.trackedCount,
       droppedFrames: this.droppedCount,
@@ -231,7 +250,7 @@ export class RawTemporalRecorder {
   }
 
   /**
-   * Trigger browser file download of the JSONL session.
+   * Trigger browser file download of the JSONL session without discarding memory buffer.
    */
   downloadJSONL() {
     if (this.buffer.length === 0) {
@@ -239,16 +258,26 @@ export class RawTemporalRecorder {
       return false;
     }
 
-    const content = this.toJSONL();
-    const blob = new Blob([content], { type: 'application/x-ndjson;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.download = `${this.sessionId || 'manux_recording'}.jsonl`;
-    a.href = url;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    return true;
+    // Check DOM / Blob availability
+    if (typeof Blob === 'undefined' || typeof document === 'undefined' || !document.createElement) {
+      return false;
+    }
+
+    try {
+      const content = this.toJSONL();
+      const blob = new Blob([content], { type: 'application/x-ndjson;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.download = `${this.sessionId || 'manux_recording'}.jsonl`;
+      a.href = url;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      return true;
+    } catch (err) {
+      console.error('[RawTemporalRecorder] downloadJSONL error:', err);
+      return false;
+    }
   }
 }

@@ -532,7 +532,7 @@ export class MouseWorkspace {
     }
   }
 
-  update({landmarks, now, quality, handedness, width, height, latency = 0}) {
+  update({landmarks, now, quality, qualityDetail, handedness, width, height, latency = 0}) {
     if (!this.active && !this.overlayActive) return null;
     if (this.enabled && latency > 450) this.stop('추적 지연이 높아 제어를 껐습니다. 해상도를 낮추고 다시 켜보세요.');
 
@@ -542,7 +542,8 @@ export class MouseWorkspace {
     this.lastLatency = latency;
 
     // Pure AirMouseController execution with activeZone natively applied
-    const state = this.controller.update({landmarks, now, quality, handedness, width, height, enabled: this.enabled});
+    const controllerQuality = typeof quality === 'boolean' ? quality : Boolean(quality?.ok);
+    const state = this.controller.update({landmarks, now, quality: controllerQuality, handedness, width, height, enabled: this.enabled});
     this.lastMouseState = state;
     if (state?.gates) {
       this.lastGates = state.gates;
@@ -550,14 +551,25 @@ export class MouseWorkspace {
 
     // Raw Temporal Recording (Zero overhead when not active)
     if (this.recorder?.recording) {
+      const wasRecording = this.recorder.recording;
       this.recorder.recordFrame({
         timestamp: now,
         landmarks,
-        quality,
+        quality: qualityDetail || quality,
         mode: this.controller?.pointerMode ?? 'trigger',
         geometryState: state,
-        events: state?.events,
+        controllerEvents: state?.events,
+        dispatch: {
+          mouseEnabled: Boolean(this.enabled),
+          paused: Boolean(this.paused),
+          bridgeSent: Boolean(this.enabled && !this.paused && this.desktop && this.bridge),
+        },
       });
+      // Handle automatic stop upon reaching maxFrames limit
+      if (wasRecording && !this.recorder.recording) {
+        this.updateRecorderUI(false);
+        this.showToast(`⏹️ 최대 녹화 한도(${this.recorder.maxFrames}프레임) 도달로 자동 저장되었습니다.`);
+      }
     }
 
     if (this.enabled) {
