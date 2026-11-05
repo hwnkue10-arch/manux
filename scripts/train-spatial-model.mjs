@@ -112,9 +112,9 @@ for (const filePath of dataFiles) {
   const rel = path.relative(DATA_DIR, filePath);
   const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   const samples = data.samples || (Array.isArray(data) ? data : []);
-  // Emphasize hard boundary snapshots so the AI learns the exact user boundary between move and right_click
+  // Emphasize hard boundary snapshots so the AI learns the exact user boundary between move and right_click / idle
   const isLatestBoundaryFile = !rel.includes('legacy');
-  const isRecentBoundaryFile = rel.includes('1793864471951') || rel.includes('1793863871951') || rel.includes('1793861497069');
+  const isRecentBoundaryFile = rel.includes('1793865071951') || rel.includes('1793864471951') || rel.includes('1793863871951') || rel.includes('1793861497069');
   const baseWeight = isLatestBoundaryFile ? 2.5 : (isRecentBoundaryFile ? 1.4 : 1.0);
   let fileValid = 0;
   for (const s of samples) {

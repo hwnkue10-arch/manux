@@ -221,7 +221,8 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const pinkyStraight = pkStraight;
   const isPinkyClenched = (dPinkyWrist < (wasPinkyDown ? 0.45 : 0.60) && dPinkyMCP < 0.65 && dPinkyRingTip < 0.20 && pkVsRing < 1.00) ||
                           pkStraightRatio < (wasPinkyDown ? 0.72 : 0.78) ||
-                          pkReachBeyondPIP < (wasPinkyDown ? 0.06 : 0.12);
+                          pkReachBeyondPIP < (wasPinkyDown ? 0.06 : 0.12) ||
+                          (projVPinky < -0.90 && dPinkyWrist < 0.42);
 
   const rawPinkyExtended = !isPinkyClenched && pkStraight && (
     wasPinkyDown
@@ -232,7 +233,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   // Minimal anatomical sanity gate for AI right-click predictions (trusts AI while rejecting closed fists)
   const pinkyConservativeOK = aiPoseHighConf =>
     aiPoseHighConf
-      ? !(dPinkyWrist < 0.48 && dPinkyMCP < 0.62 && dPinkyRingTip < 0.18)
+      ? !(dPinkyWrist < 0.48 && dPinkyMCP < 0.62 && dPinkyRingTip < 0.18) && !(projVPinky < -0.90 && dPinkyWrist < 0.42)
       : (!isPinkyClenched && pkCos < (wasPinkyDown ? 0.0 : -0.15));
 
   // 4. Thumb Extension (좌클릭 - Left Click):
