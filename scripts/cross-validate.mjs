@@ -5,10 +5,34 @@ const DATA_DIR = path.join(process.cwd(), 'data');
 const CLASSES = ['move', 'left_click', 'right_click', 'both_click', 'scroll', 'idle'];
 const CLASS_TO_IDX = Object.fromEntries(CLASSES.map((c, i) => [c, i]));
 
+function cos3D(a, b, c) {
+  const ux = a.x - b.x, uy = a.y - b.y, uz = ((a.z ?? 0) - (b.z ?? 0)) * 0.45;
+  const vx = c.x - b.x, vy = c.y - b.y, vz = ((c.z ?? 0) - (b.z ?? 0)) * 0.45;
+  const len = Math.hypot(ux, uy, uz) * Math.hypot(vx, vy, vz);
+  return len > 1e-8 ? (ux * vx + uy * vy + uz * vz) / len : 0;
+}
+
+function dist3D(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y, ((a.z ?? 0) - (b.z ?? 0)) * 0.45);
+}
+
 function extractFeatures(pts) {
   const p0 = pts[0];
   const p9 = pts[9];
   const palm = Math.hypot(p9.x - p0.x, p9.y - p0.y) || 1e-4;
+  const palm3D = Math.max(palm, dist3D(p0, p9), dist3D(pts[5], pts[17])) || 1e-4;
+
+  const vx = p9.x - p0.x, vy = p9.y - p0.y, vz = ((p9.z ?? 0) - (p0.z ?? 0)) * 0.45;
+  const vLen = Math.hypot(vx, vy, vz) || 1e-5;
+  const vHatX = vx / vLen, vHatY = vy / vLen, vHatZ = vz / vLen;
+  const ax = pts[5].x - pts[17].x, ay = pts[5].y - pts[17].y, az = ((pts[5].z ?? 0) - (pts[17].z ?? 0)) * 0.45;
+  const aDotV = ax * vHatX + ay * vHatY + az * vHatZ;
+  const ux = ax - aDotV * vHatX, uy = ay - aDotV * vHatY, uz = az - aDotV * vHatZ;
+  const uLen = Math.hypot(ux, uy, uz) || 1e-5;
+  const uHatX = ux / uLen, uHatY = uy / uLen, uHatZ = uz / uLen;
+
+  const projV = (a, b) => ((a.x - b.x) * vHatX + (a.y - b.y) * vHatY + (((a.z ?? 0) - (b.z ?? 0)) * 0.45) * vHatZ) / palm3D;
+  const projU = (a, b) => ((a.x - b.x) * uHatX + (a.y - b.y) * uHatY + (((a.z ?? 0) - (b.z ?? 0)) * 0.45) * uHatZ) / palm3D;
 
   const feats = [];
   for (let i = 0; i < 21; i++) {
@@ -29,6 +53,20 @@ function extractFeatures(pts) {
   feats.push(Math.hypot(pts[4].x - pts[9].x, pts[4].y - pts[9].y) / palm);
   feats.push(Math.hypot(pts[4].x - pts[2].x, pts[4].y - pts[2].y) / palm);
   feats.push(Math.hypot(pts[20].x - pts[9].x, pts[20].y - pts[9].y) / palm);
+
+  feats.push(cos3D(pts[2], pts[3], pts[4]));
+  feats.push(cos3D(pts[1], pts[2], pts[4]));
+  feats.push(cos3D(pts[5], pts[6], pts[8]));
+  feats.push(cos3D(pts[9], pts[10], pts[12]));
+  feats.push(cos3D(pts[13], pts[14], pts[16]));
+  feats.push(cos3D(pts[17], pts[18], pts[20]));
+  feats.push(dist3D(pts[4], pts[6]) / palm3D);
+  const ringSpan = Math.max(0.20 * palm3D, dist3D(pts[16], pts[13]));
+  feats.push(Math.min(4.0, dist3D(pts[20], pts[17]) / ringSpan));
+  feats.push(projV(pts[20], pts[17]));
+  feats.push(projV(pts[8], pts[5]));
+  feats.push(projV(pts[12], pts[9]));
+  feats.push(projU(pts[4], pts[2]));
 
   return feats;
 }

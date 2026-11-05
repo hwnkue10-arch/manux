@@ -5,10 +5,35 @@ const DATA_DIR = path.join(process.cwd(), 'data');
 const CLASSES = ['move', 'left_click', 'right_click', 'both_click', 'scroll', 'idle'];
 const CLASS_TO_IDX = Object.fromEntries(CLASSES.map((c, i) => [c, i]));
 
+function cos3D(a, b, c) {
+  const ux = a.x - b.x, uy = a.y - b.y, uz = ((a.z ?? 0) - (b.z ?? 0)) * 0.45;
+  const vx = c.x - b.x, vy = c.y - b.y, vz = ((c.z ?? 0) - (b.z ?? 0)) * 0.45;
+  const len = Math.hypot(ux, uy, uz) * Math.hypot(vx, vy, vz);
+  return len > 1e-8 ? (ux * vx + uy * vy + uz * vz) / len : 0;
+}
+
+function dist3D(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y, ((a.z ?? 0) - (b.z ?? 0)) * 0.45);
+}
+
 function extractFeatures(pts) {
   const p0 = pts[0];
   const p9 = pts[9];
   const palm = Math.hypot(p9.x - p0.x, p9.y - p0.y) || 1e-4;
+  const palm3D = Math.max(palm, dist3D(p0, p9), dist3D(pts[5], pts[17])) || 1e-4;
+
+  // Intrinsic palm basis (vHat: 0->9, uHat: 17->5 orthogonalized)
+  const vx = p9.x - p0.x, vy = p9.y - p0.y, vz = ((p9.z ?? 0) - (p0.z ?? 0)) * 0.45;
+  const vLen = Math.hypot(vx, vy, vz) || 1e-5;
+  const vHatX = vx / vLen, vHatY = vy / vLen, vHatZ = vz / vLen;
+  const ax = pts[5].x - pts[17].x, ay = pts[5].y - pts[17].y, az = ((pts[5].z ?? 0) - (pts[17].z ?? 0)) * 0.45;
+  const aDotV = ax * vHatX + ay * vHatY + az * vHatZ;
+  const ux = ax - aDotV * vHatX, uy = ay - aDotV * vHatY, uz = az - aDotV * vHatZ;
+  const uLen = Math.hypot(ux, uy, uz) || 1e-5;
+  const uHatX = ux / uLen, uHatY = uy / uLen, uHatZ = uz / uLen;
+
+  const projV = (a, b) => ((a.x - b.x) * vHatX + (a.y - b.y) * vHatY + (((a.z ?? 0) - (b.z ?? 0)) * 0.45) * vHatZ) / palm3D;
+  const projU = (a, b) => ((a.x - b.x) * uHatX + (a.y - b.y) * uHatY + (((a.z ?? 0) - (b.z ?? 0)) * 0.45) * uHatZ) / palm3D;
 
   const feats = [];
   // 1. Normalized 3D relative positions (21 * 3 = 63 features)
@@ -33,6 +58,21 @@ function extractFeatures(pts) {
   feats.push(Math.hypot(pts[4].x - pts[9].x, pts[4].y - pts[9].y) / palm); // Thumb tip to Middle MCP
   feats.push(Math.hypot(pts[4].x - pts[2].x, pts[4].y - pts[2].y) / palm); // Thumb tip to Thumb CMC
   feats.push(Math.hypot(pts[20].x - pts[9].x, pts[20].y - pts[9].y) / palm); // Pinky tip to Middle MCP
+
+  // 4. 3D Joint Angle Cosines & Intrinsic Basis Projections (12 features -> 88 total)
+  feats.push(cos3D(pts[2], pts[3], pts[4])); // Thumb IP straightness
+  feats.push(cos3D(pts[1], pts[2], pts[4])); // Thumb MCP straightness
+  feats.push(cos3D(pts[5], pts[6], pts[8])); // Index PIP straightness
+  feats.push(cos3D(pts[9], pts[10], pts[12])); // Middle PIP straightness
+  feats.push(cos3D(pts[13], pts[14], pts[16])); // Ring PIP straightness
+  feats.push(cos3D(pts[17], pts[18], pts[20])); // Pinky PIP straightness
+  feats.push(dist3D(pts[4], pts[6]) / palm3D); // Thumb to Index PIP 3D clearance
+  const ringSpan = Math.max(0.20 * palm3D, dist3D(pts[16], pts[13]));
+  feats.push(Math.min(4.0, dist3D(pts[20], pts[17]) / ringSpan)); // Pinky vs Ring span ratio
+  feats.push(projV(pts[20], pts[17])); // Pinky axial forward projection
+  feats.push(projV(pts[8], pts[5])); // Index axial forward projection
+  feats.push(projV(pts[12], pts[9])); // Middle axial forward projection
+  feats.push(projU(pts[4], pts[2])); // Thumb radial abduction projection
 
   return feats;
 }
@@ -351,11 +391,35 @@ const hBuf = new Float64Array(H);
 const logitsBuf = new Float64Array(NUM_CLASSES);
 const probsBuf = new Float64Array(NUM_CLASSES);
 
+function cos3D(a, b, c) {
+  const ux = a.x - b.x, uy = a.y - b.y, uz = ((a.z ?? 0) - (b.z ?? 0)) * 0.45;
+  const vx = c.x - b.x, vy = c.y - b.y, vz = ((c.z ?? 0) - (b.z ?? 0)) * 0.45;
+  const len = Math.hypot(ux, uy, uz) * Math.hypot(vx, vy, vz);
+  return len > 1e-8 ? (ux * vx + uy * vy + uz * vz) / len : 0;
+}
+
+function dist3D(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y, ((a.z ?? 0) - (b.z ?? 0)) * 0.45);
+}
+
 export function extractPoseFeatures(pts, outBuf = featBuf) {
   if (!pts || pts.length !== 21) return null;
   const p0 = pts[0];
   const p9 = pts[9];
   const palm = Math.hypot(p9.x - p0.x, p9.y - p0.y) || 1e-4;
+  const palm3D = Math.max(palm, dist3D(p0, p9), dist3D(pts[5], pts[17])) || 1e-4;
+
+  const vx = p9.x - p0.x, vy = p9.y - p0.y, vz = ((p9.z ?? 0) - (p0.z ?? 0)) * 0.45;
+  const vLen = Math.hypot(vx, vy, vz) || 1e-5;
+  const vHatX = vx / vLen, vHatY = vy / vLen, vHatZ = vz / vLen;
+  const ax = pts[5].x - pts[17].x, ay = pts[5].y - pts[17].y, az = ((pts[5].z ?? 0) - (pts[17].z ?? 0)) * 0.45;
+  const aDotV = ax * vHatX + ay * vHatY + az * vHatZ;
+  const ux = ax - aDotV * vHatX, uy = ay - aDotV * vHatY, uz = az - aDotV * vHatZ;
+  const uLen = Math.hypot(ux, uy, uz) || 1e-5;
+  const uHatX = ux / uLen, uHatY = uy / uLen, uHatZ = uz / uLen;
+
+  const projV = (a, b) => ((a.x - b.x) * vHatX + (a.y - b.y) * vHatY + (((a.z ?? 0) - (b.z ?? 0)) * 0.45) * vHatZ) / palm3D;
+  const projU = (a, b) => ((a.x - b.x) * uHatX + (a.y - b.y) * uHatY + (((a.z ?? 0) - (b.z ?? 0)) * 0.45) * uHatZ) / palm3D;
 
   let idx = 0;
   for (let i = 0; i < 21; i++) {
@@ -381,6 +445,21 @@ export function extractPoseFeatures(pts, outBuf = featBuf) {
   outBuf[idx++] = Math.hypot(pts[4].x - pts[9].x, pts[4].y - pts[9].y) / palm;
   outBuf[idx++] = Math.hypot(pts[4].x - pts[2].x, pts[4].y - pts[2].y) / palm;
   outBuf[idx++] = Math.hypot(pts[20].x - pts[9].x, pts[20].y - pts[9].y) / palm;
+
+  // 3D Joint Angle Cosines & Intrinsic Basis Projections (12 features -> 88 total)
+  outBuf[idx++] = cos3D(pts[2], pts[3], pts[4]);
+  outBuf[idx++] = cos3D(pts[1], pts[2], pts[4]);
+  outBuf[idx++] = cos3D(pts[5], pts[6], pts[8]);
+  outBuf[idx++] = cos3D(pts[9], pts[10], pts[12]);
+  outBuf[idx++] = cos3D(pts[13], pts[14], pts[16]);
+  outBuf[idx++] = cos3D(pts[17], pts[18], pts[20]);
+  outBuf[idx++] = dist3D(pts[4], pts[6]) / palm3D;
+  const ringSpan = Math.max(0.20 * palm3D, dist3D(pts[16], pts[13]));
+  outBuf[idx++] = Math.min(4.0, dist3D(pts[20], pts[17]) / ringSpan);
+  outBuf[idx++] = projV(pts[20], pts[17]);
+  outBuf[idx++] = projV(pts[8], pts[5]);
+  outBuf[idx++] = projV(pts[12], pts[9]);
+  outBuf[idx++] = projU(pts[4], pts[2]);
 
   return outBuf;
 }
@@ -418,13 +497,30 @@ export function predictPose(pts) {
     probsBuf[c] = e;
     sumExp += e;
   }
+  for (let c = 0; c < NUM_CLASSES; c++) {
+    probsBuf[c] /= sumExp;
+  }
+
+  // Conservative Right-Click Prior:
+  // Only suppress right_click when pinky is genuinely curled toward wrist (pkCos > -0.25 or projVPinky < -0.30)
+  const pinkyClearlyCurled = x[81] > -0.25 || x[84] < -0.30;
+  if (pinkyClearlyCurled && probsBuf[2] < 0.85) {
+    probsBuf[0] += probsBuf[2];
+    probsBuf[2] = 0;
+  }
+
+  // Thumb tucked guard: prevents false both_click when thumb is tucked close to index knuckle
+  if (x[68] < 0.22 && probsBuf[3] < 0.80) {
+    probsBuf[2] += probsBuf[3]; // borderline both_click -> right_click
+    probsBuf[3] = 0;
+  }
 
   let bestClass = CLASSES[0];
-  let maxProb = 0;
+  let maxProb = -1;
   const probabilities = {};
 
   for (let c = 0; c < NUM_CLASSES; c++) {
-    const p = probsBuf[c] / sumExp;
+    const p = probsBuf[c];
     probabilities[CLASSES[c]] = Number(p.toFixed(4));
     if (p > maxProb) {
       maxProb = p;

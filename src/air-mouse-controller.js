@@ -194,7 +194,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
   const indexOpen = pointerMode === 'trigger' ? fingerOpen2D(5, wasScrolling) : index;
   const middleOpen = pointerMode === 'trigger' ? fingerOpen2D(9, wasScrolling) : middle;
-  const ringOpen = pointerMode === 'trigger' ? fingerOpen2D(13, wasScrolling) : ring;
+  const ringOpen = pointerMode === 'trigger' ? fingerOpen2D(13, false) : ring;
 
   // In index-like modes, index finger aiming away from knuckle
   const indexAiming = pointerMode === 'trigger'
@@ -213,16 +213,22 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const dPinkyRingTip = distZDamped(points[20], points[16]) / palm;
   const projVPinky = projV(points[20], points[17]);
 
-  // DIP 꺾임 허용, PIP(pkCos) 펴짐 검사: 새끼손가락은 외측(lateral)으로 뻗으므로 전방 투영값(projVPinky)을 과도하게 제한하지 않음
+  // Conservative Right-Click: 새끼손가락이 주먹 속에 웅크려 닫힌 자세만 확실히 차단하고,
+  // 외측으로 편안하게 펼친 자연스러운 우클릭 자세는 힘들이지 않고 부드럽게 감지
   const pkStraight = pkCos < (wasPinkyDown ? -0.15 : -0.26);
   const pinkyStraight = pkStraight;
-  const isPinkyClenched = dPinkyWrist < 0.82 && dPinkyMCP < 0.22;
+  const isPinkyClenched = dPinkyWrist < (wasPinkyDown ? 0.32 : 0.40) ||
+                          (dPinkyWrist < (wasPinkyDown ? 0.45 : 0.60) && dPinkyRingTip < 0.20 && pkVsRing < 1.00) ||
+                          projVPinky < (wasPinkyDown ? -0.35 : -0.32);
 
   const rawPinkyExtended = !isPinkyClenched && pkStraight && (
     wasPinkyDown
-      ? (dPinkyMCP > 0.22 && pkVsRing > 1.02 && dPinkyRingTip > 0.15)
+      ? (dPinkyMCP > 0.22 && pkVsRing > 1.00 && dPinkyRingTip > 0.14)
       : (dPinkyMCP > 0.25 && pkVsRing > 1.04 && dPinkyRingTip > 0.16)
   );
+
+  // Anatomical plausibility gate for AI right-click predictions (blocks genuinely clenched fists without physical strain)
+  const pinkyConservativeOK = !isPinkyClenched && pkCos < (wasPinkyDown ? -0.10 : -0.20);
 
   // 4. Thumb Extension (좌클릭 - Left Click):
   const thCos234 = cos3D(points[2], points[3], points[4]);
@@ -263,10 +269,19 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
   const rawThumbExtended = thStraight && thAbducted && thReach && thClearance;
 
+  // Anatomical plausibility gate for AI left-click / both-click predictions
+  const thumbConservativeOK =
+    dThumbBase5 > (wasThumbDown ? 0.20 : 0.30) &&
+    dThumbBase6 > (wasThumbDown ? 0.18 : 0.24) &&
+    dThumbMCP > (wasThumbDown ? 0.24 : 0.30) &&
+    thCos234 < (wasThumbDown ? -0.28 : -0.45);
+
   // STRICT MUTUAL EXCLUSIVITY:
   // Scroll and Clicks (Left / Right / Both) are 100% mutually exclusive!
-  // If thumb or pinky is extended, a CLICK gesture is present, so SCROLL CANNOT ENGAGE.
-  const isClickGesture = Boolean(rawThumbExtended || rawPinkyExtended);
+  // If already scrolling (wasScrolling), clicks are locked out so minor thumb/pinky shift must not break V-sign scroll.
+  const isClickGesture = wasScrolling
+    ? false
+    : Boolean(rawThumbExtended || rawPinkyExtended);
 
   // Open Palm posture (🖐): Index + Middle + Ring fingers all extended forward (neutral rest just like a fist)
   const openPalmPosture = pointerMode === 'trigger' && indexOpen && middleOpen && ringOpen;
@@ -335,27 +350,40 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
     const aiPose = hybridAI ? (smoothedAI ?? predictPose(landmarks)) : null;
     if (aiPose && aiPose.confidence >= 0.65) {
-      if (aiPose.action === 'both_click') {
-        canPressLeft = true;
-        canPressRight = true;
+      const aiRightOK = aiPose.confidence >= (wasPinkyDown ? 0.60 : 0.65) && pinkyConservativeOK;
+      const aiLeftOK = thumbConservativeOK;
+      if (wasScrolling && isScrollGesture) {
+        // Maintain active V-sign scroll when the hand physically holds V-sign
+        effIsScroll = true;
+        canPressLeft = false;
+        canPressRight = false;
+        effIsFist = false;
+        effOpenPalm = false;
+      } else if (aiPose.action === 'both_click') {
+        canPressLeft = aiLeftOK || rawThumbExtended;
+        canPressRight = aiRightOK || rawPinkyExtended;
         effIsFist = false;
         effOpenPalm = false;
         effIsScroll = false;
       } else if (aiPose.action === 'left_click') {
-        canPressLeft = true;
+        canPressLeft = aiLeftOK || rawThumbExtended;
         canPressRight = false;
         effIsFist = false;
         effOpenPalm = false;
         effIsScroll = false;
       } else if (aiPose.action === 'right_click') {
-        canPressRight = true;
+        // Conservative right-click: only trigger when pinky is unmistakably extended & AI is confident
+        canPressRight = aiRightOK || rawPinkyExtended;
         canPressLeft = false;
         effIsFist = false;
         effOpenPalm = false;
         effIsScroll = false;
       } else if (aiPose.action === 'scroll') {
-        // Enforce strict mutual exclusivity: AI scroll cannot override an active click gesture
-        if (!isClickGesture) {
+        // Enforce strict mutual exclusivity and verify index+middle are not curled into a fist
+        const vSignPlausible = cos3D(points[5], points[6], points[8]) < -0.15 &&
+                               cos3D(points[9], points[10], points[12]) < -0.15 &&
+                               !ringOpen;
+        if (!isClickGesture && vSignPlausible) {
           effIsScroll = true;
           canPressLeft = false;
           canPressRight = false;
@@ -363,15 +391,20 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
           effOpenPalm = false;
         }
       } else if (aiPose.action === 'idle') {
-        effIsFist = true;
-        canPressLeft = false;
-        canPressRight = false;
-        effIsScroll = false;
+        const clearlyAiming = indexAiming && cos3D(points[5], points[6], points[8]) < -0.65 && !openPalmPosture;
+        if (!clearlyAiming) {
+          effIsFist = true;
+          canPressLeft = false;
+          canPressRight = false;
+          effIsScroll = false;
+        }
       } else if (aiPose.action === 'move') {
-        canPressLeft = false;
+        const keepThumbHold = wasThumbDown && rawThumbExtended && aiPose.confidence < 0.92;
+        const clearlyClenchedFist = isFist && cos3D(points[5], points[6], points[8]) > 0.15 && !rawThumbExtended && !rawPinkyExtended;
+        canPressLeft = keepThumbHold;
         canPressRight = false;
         effIsScroll = false;
-        effIsFist = false;
+        effIsFist = clearlyClenchedFist;
         effOpenPalm = false;
       }
     }
@@ -674,6 +707,7 @@ export class AirMouseController {
     this.filtered = null;
     this.remaining = {x:0,y:0};
     this.leftDown = false;
+    this.leftDownSince = null;
     this.rightDown = false;
     this.armed = false;
     this.releaseSince = null;
@@ -727,6 +761,7 @@ export class AirMouseController {
     if (this.rightDown) events.push({type:'button', button:'right', down:false});
     if (this.leftDown || this.rightDown) events.push({type:'release'});
     this.leftDown = false;
+    this.leftDownSince = null;
     this.rightDown = false;
     this.mode = 'idle';
     this.candidate = null;
@@ -800,32 +835,39 @@ export class AirMouseController {
         this.aiBuffer.push(rawAI);
         if (this.aiBuffer.length > 3) this.aiBuffer.shift();
 
-        const weights = {};
-        for (let i = 0; i < this.aiBuffer.length; i++) {
-          const item = this.aiBuffer[i];
-          const recencyMultiplier = (i === this.aiBuffer.length - 1) ? 2.0 : 1.0;
-          weights[item.action] = (weights[item.action] || 0) + item.confidence * recencyMultiplier;
-        }
-        let best = rawAI.action;
-        let maxW = 0;
-        for (const [act, w] of Object.entries(weights)) {
-          if (w > maxW) {
-            maxW = w;
-            best = act;
+        // Fast-path: When rawAI has high confidence (>= 0.72), use it directly with zero buffer delay
+        // so intentional rapid actions (like Double-Click tap/release) are never swallowed as chattering.
+        // Only apply 3-frame weighted smoothing on low-confidence (< 0.72) boundary frames.
+        if (rawAI.confidence >= 0.72) {
+          smoothedAI = rawAI;
+        } else {
+          const weights = {};
+          for (let i = 0; i < this.aiBuffer.length; i++) {
+            const item = this.aiBuffer[i];
+            const recencyMultiplier = (i === this.aiBuffer.length - 1) ? 2.0 : 1.0;
+            weights[item.action] = (weights[item.action] || 0) + item.confidence * recencyMultiplier;
           }
+          let best = rawAI.action;
+          let maxW = 0;
+          for (const [act, w] of Object.entries(weights)) {
+            if (w > maxW) {
+              maxW = w;
+              best = act;
+            }
+          }
+          smoothedAI = {
+            action: best,
+            confidence: rawAI.action === best ? rawAI.confidence : Math.min(rawAI.confidence, 0.85),
+            probabilities: rawAI.probabilities,
+          };
         }
-        smoothedAI = {
-          action: best,
-          confidence: rawAI.action === best ? rawAI.confidence : Math.min(rawAI.confidence, 0.85),
-          probabilities: rawAI.probabilities,
-        };
       }
     }
     const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll, this.pointerMode, this.activeZone, this.hybridAI, smoothedAI) : null;
     if (observed?.gates) this.lastGates = observed.gates;
     if (!observed) {
-      // Index/Trigger mode: a few dropped/poor frames must not break an ongoing drag.
-      if (isIndexLike && (this.leftDown || this.rightDown) &&
+      // Index/Trigger mode: a few dropped/poor frames must not break an ongoing drag or active scroll.
+      if (isIndexLike && (this.leftDown || this.rightDown || this.scrollDown) &&
           this.lastValidAt !== null && now - this.lastValidAt < 300) {
         return this.state('holding');
       }
@@ -875,7 +917,7 @@ export class AirMouseController {
       // 6. Rest: Complete 5-finger fist (all 4 fingers curled AND thumb not extended).
       const g = observed.gates;
 
-      // Scroll (🖐 Open Palm / ✌️ V-sign trigger): Engages wheel continuously with hysteresis
+      // Scroll (✌️ V-sign trigger): Engages wheel continuously with hysteresis
       // STRICT MUTUAL EXCLUSIVITY & ANTI-CHATTERING:
       // 1. Scroll entrance requires 2 consecutive frames and CANNOT start while a button is held
       if (g.isScrollGesture && !this.leftDown && !this.rightDown) {
@@ -887,6 +929,7 @@ export class AirMouseController {
       if (!this.scrollDown && this.scrollFrames >= 2) {
         if (this.leftDown) {
           this.leftDown = false;
+          this.leftDownSince = null;
           this.leftReleaseCount = 0;
           events.push({type: 'button', button: 'left', down: false});
         }
@@ -898,13 +941,17 @@ export class AirMouseController {
         this.scrollDown = true;
         this.scrollReleaseCount = 0;
       } else if (this.scrollDown) {
-        // Exit scroll when hand turns into a fist OR returns to clean single index aiming
-        const returningToAim = Boolean(g.isIndexStraight && !g.middleRaised && !g.ringOpen);
-        if (g.isFist || g.openPalm || ++this.scrollReleaseCount >= (returningToAim ? 4 : 8)) {
-          this.scrollDown = false;
+        if (g.isScrollGesture) {
           this.scrollReleaseCount = 0;
-          this.scrollFrames = 0;
-          this.scrollCooldownFrames = 4; // 4-frame anti-chatter cooldown on scroll exit
+        } else {
+          // Exit scroll when hand turns into a fist OR returns to clean single index aiming
+          const returningToAim = Boolean(g.isIndexStraight && !g.middleRaised && !g.ringOpen);
+          if (g.isFist || g.openPalm || ++this.scrollReleaseCount >= (returningToAim ? 4 : 8)) {
+            this.scrollDown = false;
+            this.scrollReleaseCount = 0;
+            this.scrollFrames = 0;
+            this.scrollCooldownFrames = 4; // 4-frame anti-chatter cooldown on scroll exit
+          }
         }
       }
       const scrolling = this.scrollDown;
@@ -914,18 +961,26 @@ export class AirMouseController {
       }
       const clickAllowed = !scrolling && this.scrollCooldownFrames === 0;
 
-      // Left Click (Thumb trigger): instant press when click is allowed, 2-frame debounced release
+      // Left Click (Thumb trigger):
+      // - Fast press (1 frame) & 2-frame release when thumb clearly retracts so rapid Double-Click is never swallowed as chattering.
+      // - Sticky 4-frame release threshold during active drag when thumb is only near the boundary (dThumbBase > 0.22) so 1~3 frame glitches never drop a drag.
       if (this.leftDown) {
-        const aiReleasesLeft = Boolean(g.aiPose && g.aiPose.confidence >= 0.70 && g.aiPose.action === 'right_click');
-        if (!g.thumbExtended || aiReleasesLeft) {
-          if (aiReleasesLeft || ++this.leftReleaseCount >= 2) {
+        const isBoundaryGlitchDuringDrag = this.dragUnlocked && g.dThumbBase > 0.22;
+        const releaseFramesNeeded = isBoundaryGlitchDuringDrag ? 4 : 2;
+        const aiSwitchesToRight = Boolean(!this.dragUnlocked && g.aiPose && g.aiPose.confidence >= 0.82 && g.aiPose.action === 'right_click');
+        if (!g.thumbExtended || aiSwitchesToRight) {
+          if (++this.leftReleaseCount >= releaseFramesNeeded) {
             this.leftDown = false;
+            this.leftDownSince = null;
             this.leftReleaseCount = 0;
             events.push({type: 'button', button: 'left', down: false});
           }
-        } else this.leftReleaseCount = 0;
+        } else {
+          this.leftReleaseCount = 0;
+        }
       } else if (g.canPressLeft && clickAllowed) {
         this.leftDown = true;
+        this.leftDownSince = now;
         this.leftReleaseCount = 0;
         this.dragDisplacement = 0;
         this.dragUnlocked = false;
@@ -933,16 +988,18 @@ export class AirMouseController {
         events.push({type: 'button', button: 'left', down: true});
       }
 
-      // Right Click (Pinky trigger): instant press when click is allowed, 2-frame debounced release
+      // Right Click (Pinky trigger, conservative):
       if (this.rightDown) {
-        const aiReleasesRight = Boolean(g.aiPose && g.aiPose.confidence >= 0.70 && g.aiPose.action === 'left_click');
-        if (!g.pinkyExtended || aiReleasesRight) {
-          if (aiReleasesRight || ++this.rightReleaseCount >= 2) {
+        const aiSwitchesToLeft = Boolean(g.aiPose && g.aiPose.confidence >= 0.80 && g.aiPose.action === 'left_click');
+        if (!g.pinkyExtended || aiSwitchesToLeft) {
+          if (++this.rightReleaseCount >= 2) {
             this.rightDown = false;
             this.rightReleaseCount = 0;
             events.push({type: 'button', button: 'right', down: false});
           }
-        } else this.rightReleaseCount = 0;
+        } else {
+          this.rightReleaseCount = 0;
+        }
       } else if (g.canPressRight && clickAllowed) {
         this.rightDown = true;
         this.rightReleaseCount = 0;

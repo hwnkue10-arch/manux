@@ -931,3 +931,96 @@ test('pointerMode: trigger anti-chattering filter suppresses single-frame scroll
   assert.equal(s.controller.leftDown, false, 'Confirmed release after 2 frames');
   assert.ok(released.events.some(e => e.type === 'button' && e.button === 'left' && !e.down));
 });
+
+test('pointerMode: trigger continuous V-sign scroll remains uninterrupted across 100+ frames without 0.5s oscillation', () => {
+  const s = session({pointerMode: 'trigger', vScroll: true, hybridAI: true, smoothing: 1});
+  s.hold('trigger');
+
+  // Enter scroll (2 frames)
+  s.feed('trigger-scroll');
+  const enterScroll = s.feed('trigger-scroll');
+  assert.equal(enterScroll.mode, 'scroll');
+  const initialAnchorY = enterScroll.scrollAnchor.y;
+
+  // Hold scroll continuously for 100 frames (simulating > 3 seconds of continuous scrolling)
+  for (let i = 0; i < 100; i++) {
+    const st = s.feed('trigger-scroll', {y: -0.05});
+    assert.equal(st.mode, 'scroll', `Frame ${i} must stay in scroll without periodic drop-out`);
+    assert.equal(st.scrollAnchor.y, initialAnchorY, 'Scroll anchor must not reset mid-scroll');
+    assert.ok(st.events.some(e => e.type === 'scroll'), `Frame ${i} must emit continuous scroll wheel events`);
+  }
+
+  // Brief dropped camera frame (< 300ms) during scroll must not reset scrollDown
+  const dropped = s.feed('trigger-scroll', {}, {landmarks: null});
+  assert.equal(dropped.phase, 'holding');
+  assert.equal(s.controller.scrollDown, true, 'Brief dropped frame must preserve scrollDown');
+
+  const resumed = s.feed('trigger-scroll', {y: -0.05});
+  assert.equal(resumed.mode, 'scroll', 'Scroll resumes immediately after brief dropped frame');
+});
+
+test('pointerMode: trigger conservative right-click rejects ambiguous boundary pinky postures', () => {
+  const s = session({pointerMode: 'trigger', hybridAI: true, smoothing: 1});
+  s.hold('trigger');
+
+  // 1. Ambiguous pinky slightly loose / close to ring finger must NOT trigger right click
+  const slightlyLoosePinky = hand('trigger');
+  slightlyLoosePinky[18] = {x: 0.63, y: 0.56, z: 0};
+  slightlyLoosePinky[19] = {x: 0.63, y: 0.58, z: 0};
+  slightlyLoosePinky[20] = {x: 0.63, y: 0.55, z: 0}; // slightly uncurled but close to ring finger
+  const st1 = s.feed('trigger', {}, {landmarks: slightlyLoosePinky});
+  assert.equal(st1.mode, 'move', 'Ambiguous loose pinky must conservatively remain move');
+  assert.equal(st1.events.filter(e => e.type === 'button').length, 0);
+
+  // 2. Pinky folded backward toward wrist (straight PIP but pointing -vHat toward wrist) must NOT trigger right click
+  const backwardPinky = hand('trigger');
+  backwardPinky[18] = {x: 0.60, y: 0.69, z: 0};
+  backwardPinky[19] = {x: 0.58, y: 0.73, z: 0};
+  backwardPinky[20] = {x: 0.56, y: 0.77, z: 0}; // pointing toward wrist (0.5, 0.8)
+  const st2 = s.feed('trigger', {}, {landmarks: backwardPinky});
+  assert.equal(st2.mode, 'move', 'Backward-folded pinky near wrist must never trigger right click');
+  assert.equal(st2.events.filter(e => e.type === 'button').length, 0);
+
+  // 3. Unmistakable full pinky extension cleanly triggers right click
+  const clearRight = s.feed('trigger-right');
+  assert.equal(clearRight.mode, 'right');
+  assert.ok(clearRight.events.some(e => e.type === 'button' && e.button === 'right' && e.down));
+});
+
+test('pointerMode: trigger preserves rapid double-click while surviving multi-frame boundary glitches during active drag', () => {
+  const s = session({pointerMode: 'trigger', hybridAI: true, smoothing: 1});
+  s.hold('trigger');
+
+  // 1. Rapid Double-Click: Tap 1 -> 2-frame release -> Tap 2 -> 2-frame release
+  const tap1 = s.feed('trigger-left');
+  assert.ok(tap1.events.some(e => e.type === 'button' && e.button === 'left' && e.down), 'Tap 1 presses immediately');
+
+  s.feed('trigger');
+  const rel1 = s.feed('trigger');
+  assert.ok(rel1.events.some(e => e.type === 'button' && e.button === 'left' && !e.down), 'Tap 1 releases after 2 frames');
+
+  const tap2 = s.feed('trigger-left');
+  assert.ok(tap2.events.some(e => e.type === 'button' && e.button === 'left' && e.down), 'Tap 2 of double-click fires immediately without chattering suppression');
+
+  s.feed('trigger');
+  const rel2 = s.feed('trigger');
+  assert.ok(rel2.events.some(e => e.type === 'button' && e.button === 'left' && !e.down), 'Tap 2 releases cleanly');
+
+  // 2. Active Drag Continuity: once dragging (dragUnlocked), 1~3 frames of boundary thumb hesitation do NOT drop drag
+  s.feed('trigger-left');
+  const dragMove = s.feed('trigger-left', {x: 0.05}); // exceeds 16px drag lock -> dragUnlocked = true
+  assert.equal(s.controller.dragUnlocked, true);
+  assert.equal(dragMove.mode, 'left');
+
+  // Construct a boundary hesitation frame where thumb slightly bends (fails strict hold, but dThumbBase > 0.22)
+  const boundaryThumb = hand('trigger-left', {x: 0.06});
+  boundaryThumb[3] = {x: 0.36, y: 0.56, z: 0};
+  boundaryThumb[4] = {x: 0.38, y: 0.52, z: 0}; // bent thumb IP, but still away from index knuckle
+
+  // 3 consecutive frames of boundary glitch during active drag must NOT release leftDown
+  for (let i = 0; i < 3; i++) {
+    const glitchFrame = s.feed('trigger-left', {x: 0.06}, {landmarks: boundaryThumb});
+    assert.equal(s.controller.leftDown, true, `Drag must survive boundary glitch frame ${i + 1}`);
+    assert.equal(glitchFrame.events.filter(e => e.type === 'button' && !e.down).length, 0);
+  }
+});
