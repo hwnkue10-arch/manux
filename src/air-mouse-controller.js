@@ -405,9 +405,10 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
         }
       } else if (aiPose.action === 'move') {
         const keepThumbHold = wasThumbDown && rawThumbExtended && aiPose.confidence < 0.92;
+        const keepPinkyHold = wasPinkyDown && (rawPinkyExtended || (pkVsRing > 1.02 && dPinkyRingTip > 0.13)) && aiPose.confidence < 0.90;
         const clearlyClenchedFist = aiPose.confidence < 0.85 && isFist && cos3D(points[5], points[6], points[8]) > 0.15 && !rawThumbExtended && !rawPinkyExtended;
         canPressLeft = keepThumbHold;
-        canPressRight = false;
+        canPressRight = keepPinkyHold;
         effIsScroll = false;
         effIsFist = clearlyClenchedFist;
         effOpenPalm = false;
@@ -993,11 +994,13 @@ export class AirMouseController {
         events.push({type: 'button', button: 'left', down: true});
       }
 
-      // Right Click (Pinky trigger, conservative):
+      // Right Click (Pinky trigger, conservative & anti-chattering):
       if (this.rightDown) {
         const aiSwitchesToLeft = Boolean(g.aiPose && g.aiPose.confidence >= 0.80 && g.aiPose.action === 'left_click');
         if (!g.pinkyExtended || aiSwitchesToLeft) {
-          if (++this.rightReleaseCount >= 2) {
+          const isBoundaryPinky = g.pkVsRing > 1.00 && g.dPinkyRingTip > 0.12 && !g.isFist;
+          const releaseFramesNeeded = isBoundaryPinky ? 4 : 2;
+          if (++this.rightReleaseCount >= releaseFramesNeeded) {
             this.rightDown = false;
             this.rightReleaseCount = 0;
             events.push({type: 'button', button: 'right', down: false});
