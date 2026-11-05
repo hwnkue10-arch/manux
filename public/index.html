@@ -143,11 +143,11 @@
         <!-- Continuous Stream Filter & Settings Box (Shown in stream mode) -->
         <div id="stream-options-box" class="stream-options-box" style="display: none;">
           <label class="stream-filter-label" title="시스템 판정과 사용자 정답이 불일치하는 순간의 프레임만 표본으로 자동 누적">
-            <input type="checkbox" id="stream-discrepancy-only" checked />
-            <span>🚨 <strong>불일치(오인식 사각지대) 프레임만 자동 선별 수집</strong> (권장)</span>
+            <input type="checkbox" id="stream-discrepancy-only" />
+            <span>🚨 <strong>불일치(오인식 사각지대) 프레임만 자동 선별 수집</strong></span>
           </label>
           <p class="stream-hint">
-            자세를 유지한 채 손목을 천천히 여러 각도로 회전하면, 시스템이 오인식하는 순간의 관절 데이터가 프레임 단위로 자동 기록됩니다.
+            자세를 유지한 채 손목을 천천히 여러 각도로 회전하면, 정상 각도와 취약 각도의 관절 데이터가 연속 프레임 표본으로 기록됩니다.
           </p>
         </div>
 

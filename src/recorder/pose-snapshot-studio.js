@@ -28,7 +28,7 @@ export class PoseSnapshotStudio {
     this.selectedGroundTruth = 'move';
     this.captureMode = 'snapshot'; // 'snapshot' | 'stream'
     this.isStreaming = false;
-    this.streamDiscrepancyOnly = true; // when true in stream mode, automatically collects only mismatch/failure frames
+    this.streamDiscrepancyOnly = false; // default false: records all angle frames (both normal and failing)
     this.streamThrottleMs = Number.isFinite(streamThrottleMs) && streamThrottleMs >= 0 ? streamThrottleMs : 50;
     this.lastStreamSampleTime = 0;
   }
