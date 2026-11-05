@@ -68,6 +68,17 @@ function extractFeatures(pts) {
   feats.push(projV(pts[12], pts[9]));
   feats.push(projU(pts[4], pts[2]));
 
+  feats.push(cos3D(pts[17], pts[18], pts[19]));
+  feats.push(cos3D(pts[18], pts[19], pts[20]));
+  feats.push(cos3D(pts[0], pts[17], pts[20]));
+  const pkBoneSum = dist3D(pts[17], pts[18]) + dist3D(pts[18], pts[19]) + dist3D(pts[19], pts[20]) || 1e-4;
+  const rgBoneSum = dist3D(pts[13], pts[14]) + dist3D(pts[14], pts[15]) + dist3D(pts[15], pts[16]) || 1e-4;
+  feats.push(dist3D(pts[17], pts[20]) / pkBoneSum);
+  feats.push(dist3D(pts[13], pts[16]) / rgBoneSum);
+  feats.push((dist3D(pts[20], pts[17]) - dist3D(pts[18], pts[17])) / palm3D);
+  feats.push(dist3D(pts[20], pts[14]) / palm3D);
+  feats.push(projU(pts[20], pts[17]));
+
   return feats;
 }
 

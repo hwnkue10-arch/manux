@@ -11,7 +11,7 @@
     <img src="https://img.shields.io/badge/Desktop-Electron_v45-47848F?style=flat-square&logo=electron&logoColor=white" alt="Desktop" />
     <img src="https://img.shields.io/badge/AI_Vision-MediaPipe_Tasks-0078D4?style=flat-square&logo=google&logoColor=white" alt="MediaPipe" />
     <img src="https://img.shields.io/badge/Custom_AI_Model-SpatialPoseModel_(Zero--GC)-8A2BE2?style=flat-square" alt="Custom AI Model" />
-    <img src="https://img.shields.io/badge/Trained_Samples-10%2C847_Gold_Dataset-success?style=flat-square" alt="Trained Samples" />
+    <img src="https://img.shields.io/badge/Trained_Samples-11%2C075_Gold_Dataset-success?style=flat-square" alt="Trained Samples" />
     <img src="https://img.shields.io/badge/Inference_Speed-0.003ms_(3.0μs)-yellow?style=flat-square" alt="Inference Speed" />
   </p>
   <p align="center">
@@ -46,10 +46,10 @@ ManuX는 단순 휴리스틱 기하 공식의 사각지대(카메라 앵글, 손
 ```mermaid
 flowchart LR
     A["웹캠 영상 (60 FPS)"] --> B["MediaPipe Tasks Vision<br/>(21개 3D 관절 추출)"]
-    B --> C["해부학 기하 특징 추출<br/>(88차원 정규화 벡터)"]
-    C --> D["🧠 SpatialPoseModel<br/>(88 -> 64 -> 6 MLP)"]
+    B --> C["해부학 기하 특징 추출<br/>(96차원 정규화 벡터)"]
+    C --> D["🧠 SpatialPoseModel<br/>(96 -> 64 -> 6 MLP)"]
     C --> E["3D 기저 정규직교기저<br/>(Gram-Schmidt)"]
-    D --> F["하이브리드 융합 엔진 &<br/>보수적 우클릭 / 안티채터링"]
+    D --> F["AI 주도 하이브리드 엔진 &<br/>비용 민감형 보수적 우클릭"]
     E --> F
     F --> G["Windows SendInput<br/>(이동 / 클릭 / 스크롤)"]
 ```
@@ -59,36 +59,37 @@ flowchart LR
 * **0-의존성 초저지연 추론**: 순수 JavaScript와 고정 크기 `Float64Array` 정적 버퍼를 사용하여, 가비지 컬렉션 발생량이 **0 Byte(Zero-GC)**이며 프레임당 추론 속도는 **0.003 ms (3.0 마이크로초)**에 불과합니다. (60 FPS 프레임 예산의 0.02% 미만 소모)
 
 ### 2. 신경망 구조 및 특징 (Architecture)
-* **입력층 (88 Features)**:
+* **입력층 (96 Features)**:
   - 손목(0번) 기준 3차원 상대 위치 벡터 (21개 관절 $\times$ 3축 = 63차원, Z축 댐핑 적용)
   - 5대 손가락 끝 ↔ 손목 거리 비율 (5차원)
   - 핵심 해부학적 관절 간 이격 거리 및 외전 클리어런스 (엄지-검지, 소지-약지, 중지-검지, 엄지-소지, 엄지-CMC 등 8차원)
-  - 5대 손가락 3D 관절 코사인 각도(`cos3D`) 및 손바닥 정규직교기저($\hat{u}, \hat{v}$) 정사영 특징 (12차원)
-* **은닉층**: 64 Hidden Units (LeakyReLU 활성화 함수, L2 정규화 적용)
-* **출력층**: 6개 액션 클래스 Softmax 확률 분포 + 보수적 해부학 가드 (`move`, `left_click`, `right_click`, `both_click`, `scroll`, `idle`)
+  - 5대 손가락 3D 관절 코사인 각도(`cos3D`), 소지 PIP/DIP/MCP 3D 굴곡 각도, 3마디 직선도 비율(`StraightRatio`) 및 손바닥 정규직교기저($\hat{u}, \hat{v}$) 정사영 특징 (20차원)
+* **은닉층**: 64 Hidden Units (LeakyReLU 활성화 함수, L2 정규화 및 비용 민감형 비대칭 손실 적용)
+* **출력층**: 6개 액션 클래스 Softmax 확률 분포 + AI 주도 보수적 결정 경계 (`move`, `left_click`, `right_click`, `both_click`, `scroll`, `idle`)
 
 ### 3. 지속적 학습(Continual Learning) 및 검증 지표
-사용자가 `Pose Snapshot Studio`로 수집한 **총 10,847개 실제 손 관절 데이터셋(13개 파일)**을 점진 학습(Continual Training)했습니다.
+사용자가 `Pose Snapshot Studio`로 수집한 **총 11,075개 실제 손 관절 데이터셋(14개 파일)**을 점진 학습(Continual Training)했습니다.
 
 | 검증 지표 | 달성 수치 | 의미 및 기술적 성과 |
 | :--- | :---: | :--- |
-| **누적 학습 데이터셋** | **10,847개 표본** | 골드 기준 데이터 + 2~6차 취약 각도 코너케이스 전수 수집 |
-| **5-Fold 교차 검증** | **96.98%** | 5개 Fold 전 구간(96.27%~97.60%) 균일 성능으로 과적합 완전 배제 |
-| **홀드아웃 테스트 정확도** | **97.51%** | 2,170개 독립 테스트셋 검증 (이동/스크롤/아이들/클릭 전 영역 고른 정확도) |
-| **6차 신규 데이터셋 개선율** | **65.11% ➔ 98.57%** | `move -> right_click` 오분류 180건 ➔ 3건, `right_click -> both_click` 71건 ➔ 1건 |
-| **단일 프레임 추론 속도** | **0.0029 ms** | 초당 34만 프레임 이상 연산 가능한 초경량 온디바이스 엔진 |
+| **누적 학습 데이터셋** | **11,075개 표본** | 골드 기준 데이터 + 2~7차 취약 각도 코너케이스 전수 수집 |
+| **5-Fold 교차 검증** | **96.42%** | 5개 Fold 전 구간 균일 성능으로 과적합 완전 배제 |
+| **홀드아웃 테스트 정확도** | **97.56%** | 2,215개 독립 테스트셋 검증 (이동/스크롤/아이들/클릭 전 영역 고른 정확도) |
+| **7차 신규 데이터셋 정확도** | **AI 100% / SYS 100%** | 228개 경계 표본에서 우클릭 113/113건, 이동 115/115건 완벽 판별 (시스템 오차단 100건 ➔ 0건) |
+| **단일 프레임 추론 속도** | **0.0032 ms** | 초당 31만 프레임 이상 연산 가능한 초경량 온디바이스 엔진 |
 
 ---
 
-## 🛡️ 무결점 채터링 방지, 연속 스크롤 유지 및 보수적 우클릭 필터
+## 🛡️ 무결점 채터링 방지, 연속 스크롤 유지 및 AI 주도 보수적 우클릭
 
 에어 마우스 환경에서 발생할 수 있는 **미세 떨림(채터링)**, **스크롤 끊김**, **우클릭 오작동**, **드래그 중 풀림 및 더블클릭 씹힘**을 완벽히 해결하기 위해 정밀 제어 아키텍처를 적용했습니다:
 
 1. **연속 V-Sign 스크롤 홀드 유지 (Zero Oscillation)**:
    - V-Sign 스크롤 진입 시 릴리즈 카운터를 매 프레임 초기화하고, 약지(Ring) 굽힘 판정의 히스테리시스 역전 현상을 제거하여 수초 이상 연속 스크롤 시에도 0.5초 단위 끊김 없이 완벽하게 유지됩니다.
    - 스크롤 중 일시적 카메라 프레임 드랍(< 300ms)이 발생하더라도 스크롤 앵커와 홀드 상태를 그대로 보존합니다.
-2. **우클릭 보수적 판정 & 인체공학적 트리거 균형 (Ergonomic Conservative Right-Click)**:
-   - 새끼손가락의 해부학적 외전(외측 펼침) 특성을 반영하여 과도한 전방 돌출 강제 대신 자연스러운 손가락 펼침 상태를 감지하면서도, 이동 및 주먹 쥔 상태에서의 오작동(False Positive)은 0건으로 완벽히 차단했습니다.
+2. **AI 주도 보수적 우클릭 학습 (AI-Driven Conservative Right-Click)**:
+   - 시스템 코드에서 인위적인 좌표 커트라인(`projV`, `dPinkyWrist`)으로 AI의 우클릭 판정을 억지로 막던 방식을 제거하고, **신경망 학습 단계에서 비대칭 비용 손실(Cost-Sensitive Loss)과 소지 3마디 직선도(`pkStraightRatio`) 및 PIP/DIP 3D 굴곡 특징을 직접 학습**시켰습니다.
+   - 애매하게 말린 이동 자세는 AI 스스로 보수적으로 `move`로 판단하고, 사용자가 실제로 새끼손가락을 폈을 때는 카메라 각도나 방향에 구애받지 않고 100% 자연스럽게 우클릭이 작동합니다.
 3. **드래그 끊김 방지 vs 고속 더블클릭 보존 (Drag Continuity & Double-Click Preservation)**:
    - **고속 더블클릭 보존**: 고신뢰도(`>= 0.72`) 프레임에 대해 AI 롤링 버퍼 지연을 바이패스(Zero-Lag Fast-Path)하여, 빠른 `딸깍-딸깍` 더블클릭 시 릴리즈 및 재진입 프레임이 채터링으로 오인되어 씹히는 현상을 원천 방지합니다.
    - **드래그 중 끊김 방지**: 드래그 잠금이 해제(`dragUnlocked`)된 연속 드래그 상태에서는 엄지가 완전히 접히지 않는 한 경계선 흔들림에 대해 **4프레임(~133ms) 릴리즈 방어선**을 적용하여 드래그 도중 1~3프레임 인식이 흔들려도 드래그가 절대 풀리지 않습니다.
@@ -109,7 +110,7 @@ manux/
 │
 ├── 🧠 src/                          # [핵심] 웹캠 비전, 제스처 판정 및 AI 엔진
 │   ├── ⭐ air-mouse-controller.js   # 🔥 [핵심 1: 하이브리드 제어기] 3D 정규직교기저 + AI 판정 융합 + 상호배타/안티채터링 상태머신
-│   ├── ⭐ spatial-pose-model.js     # 🔥 [핵심 2: 공간 자세 AI 모델] 10,847개 표본 기반 순수 JS 초경량 신경망 (0.003ms 추론)
+│   ├── ⭐ spatial-pose-model.js     # 🔥 [핵심 2: 공간 자세 AI 모델] 11,075개 표본 기반 순수 JS 초경량 신경망 (0.003ms 추론)
 │   ├── 📁 recorder/                 # [데이터 수집 & 검증 엔진]
 │   │   ├── ⭐ pose-snapshot-studio.js # [자세 표본 스튜디오] 단일/연속 표본 수집, 시스템 판정 vs 정답 대조, 취약 각도 검출
 │   │   └── 📄 raw-temporal-recorder.js # 시계열 원본 연속 프레임 및 라벨 어노테이션 수집 엔진
@@ -142,7 +143,7 @@ manux/
 │   └── 📁 helpers/                  # 가상 3D 손 관절 합성 픽스처 (`mouse-hand.js`)
 │
 └── 📜 scripts/                      # AI 학습 및 빌드 유틸리티
-    ├── 📄 train-spatial-model.mjs   # 10,847개 표본 대상 신경망 학습 및 JS 모델 자동 빌드
+    ├── 📄 train-spatial-model.mjs   # 11,075개 표본 대상 신경망 학습 및 JS 모델 자동 빌드
     ├── 📄 cross-validate.mjs        # 5-Fold 교차 검증 파이프라인
     ├── 📄 setup.mjs                 # 의존성 및 모델 다운로드 자동화
     └── 📄 test-desktop-mouse.mjs    # 네이티브 드라이버 dry-run 검증

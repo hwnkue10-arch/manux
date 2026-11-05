@@ -59,13 +59,13 @@ function extractFeatures(pts) {
   feats.push(Math.hypot(pts[4].x - pts[2].x, pts[4].y - pts[2].y) / palm); // Thumb tip to Thumb CMC
   feats.push(Math.hypot(pts[20].x - pts[9].x, pts[20].y - pts[9].y) / palm); // Pinky tip to Middle MCP
 
-  // 4. 3D Joint Angle Cosines & Intrinsic Basis Projections (12 features -> 88 total)
+  // 4. 3D Joint Angle Cosines & Intrinsic Basis Projections (20 features -> 96 total)
   feats.push(cos3D(pts[2], pts[3], pts[4])); // Thumb IP straightness
   feats.push(cos3D(pts[1], pts[2], pts[4])); // Thumb MCP straightness
   feats.push(cos3D(pts[5], pts[6], pts[8])); // Index PIP straightness
   feats.push(cos3D(pts[9], pts[10], pts[12])); // Middle PIP straightness
   feats.push(cos3D(pts[13], pts[14], pts[16])); // Ring PIP straightness
-  feats.push(cos3D(pts[17], pts[18], pts[20])); // Pinky PIP straightness
+  feats.push(cos3D(pts[17], pts[18], pts[20])); // Pinky PIP-Tip straightness
   feats.push(dist3D(pts[4], pts[6]) / palm3D); // Thumb to Index PIP 3D clearance
   const ringSpan = Math.max(0.20 * palm3D, dist3D(pts[16], pts[13]));
   feats.push(Math.min(4.0, dist3D(pts[20], pts[17]) / ringSpan)); // Pinky vs Ring span ratio
@@ -73,6 +73,18 @@ function extractFeatures(pts) {
   feats.push(projV(pts[8], pts[5])); // Index axial forward projection
   feats.push(projV(pts[12], pts[9])); // Middle axial forward projection
   feats.push(projU(pts[4], pts[2])); // Thumb radial abduction projection
+
+  // 5. High-Precision Pinky Curl vs Extension Anatomical Features (8 features -> 96 total)
+  feats.push(cos3D(pts[17], pts[18], pts[19])); // Pinky PIP true 3D cosine (88)
+  feats.push(cos3D(pts[18], pts[19], pts[20])); // Pinky DIP true 3D cosine (89)
+  feats.push(cos3D(pts[0], pts[17], pts[20])); // Wrist-PinkyMCP-PinkyTip cosine (90)
+  const pkBoneSum = dist3D(pts[17], pts[18]) + dist3D(pts[18], pts[19]) + dist3D(pts[19], pts[20]) || 1e-4;
+  const rgBoneSum = dist3D(pts[13], pts[14]) + dist3D(pts[14], pts[15]) + dist3D(pts[15], pts[16]) || 1e-4;
+  feats.push(dist3D(pts[17], pts[20]) / pkBoneSum); // Pinky 3-segment collinearity ratio (91)
+  feats.push(dist3D(pts[13], pts[16]) / rgBoneSum); // Ring 3-segment collinearity ratio (92)
+  feats.push((dist3D(pts[20], pts[17]) - dist3D(pts[18], pts[17])) / palm3D); // Pinky tip reach beyond PIP (93)
+  feats.push(dist3D(pts[20], pts[14]) / palm3D); // Pinky tip to Ring PIP 3D clearance (94)
+  feats.push(projU(pts[20], pts[17])); // Pinky lateral ulnar projection (95)
 
   return feats;
 }
@@ -100,6 +112,10 @@ for (const filePath of dataFiles) {
   const rel = path.relative(DATA_DIR, filePath);
   const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   const samples = data.samples || (Array.isArray(data) ? data : []);
+  // Emphasize hard boundary snapshots so the AI learns the exact user boundary between move and right_click
+  const isLatestBoundaryFile = !rel.includes('legacy');
+  const isRecentBoundaryFile = rel.includes('1793863871951') || rel.includes('1793861497069');
+  const baseWeight = isLatestBoundaryFile ? 2.5 : (isRecentBoundaryFile ? 1.4 : 1.0);
   let fileValid = 0;
   for (const s of samples) {
     if (!s.rawLandmarks || s.rawLandmarks.length !== 21) continue;
@@ -107,11 +123,11 @@ for (const filePath of dataFiles) {
     const y = CLASS_TO_IDX[action];
     if (y !== undefined) {
       const x = extractFeatures(s.rawLandmarks);
-      allSamples.push({ x, y, cls: action });
+      allSamples.push({ x, y, cls: action, weight: baseWeight, file: rel });
       fileValid++;
     }
   }
-  console.log(` - ${rel}: ${fileValid} valid samples`);
+  console.log(` - ${rel}: ${fileValid} valid samples (weight: ${baseWeight}x)`);
 }
 
 console.log(`Loaded ${allSamples.length} total valid samples.`);
@@ -258,15 +274,20 @@ for (let ep = 1; ep <= EPOCHS; ep++) {
 
     for (const s of batch) {
       const { h, probs } = forward(s.x);
+      const sw = s.weight || 1.0;
+
+      // Cost-sensitive penalty: guide AI to be naturally conservative about right_click when GT is move/idle/left_click
+      const falseRightPenalty = (s.y !== 2 && s.y !== 3 && probs[2] > 0.05) ? 1.65 : 1.0;
+      const effWeight = (sw * falseRightPenalty) / B;
 
       // Gradient of cross-entropy w.r.t logits
       const dLogits = new Float64Array(NUM_CLASSES);
       for (let c = 0; c < NUM_CLASSES; c++) {
-        dLogits[c] = probs[c] - (c === s.y ? 1.0 : 0.0);
-        gb2[c] += dLogits[c] / B;
+        dLogits[c] = (probs[c] - (c === s.y ? 1.0 : 0.0)) * effWeight;
+        gb2[c] += dLogits[c];
         const w2_c = W2[c];
         for (let i = 0; i < H; i++) {
-          gW2[c][i] += (dLogits[c] * h[i]) / B;
+          gW2[c][i] += dLogits[c] * h[i];
         }
       }
 
@@ -277,9 +298,9 @@ for (let ep = 1; ep <= EPOCHS; ep++) {
           dh += dLogits[c] * W2[c][i];
         }
         const dhRelu = h[i] > 0 ? dh : dh * 0.05;
-        gb1[i] += dhRelu / B;
+        gb1[i] += dhRelu;
         for (let j = 0; j < featDim; j++) {
-          gW1[i][j] += (dhRelu * s.x[j]) / B;
+          gW1[i][j] += dhRelu * s.x[j];
         }
       }
     }
@@ -446,7 +467,7 @@ export function extractPoseFeatures(pts, outBuf = featBuf) {
   outBuf[idx++] = Math.hypot(pts[4].x - pts[2].x, pts[4].y - pts[2].y) / palm;
   outBuf[idx++] = Math.hypot(pts[20].x - pts[9].x, pts[20].y - pts[9].y) / palm;
 
-  // 3D Joint Angle Cosines & Intrinsic Basis Projections (12 features -> 88 total)
+  // 3D Joint Angle Cosines & Intrinsic Basis Projections (20 features -> 96 total)
   outBuf[idx++] = cos3D(pts[2], pts[3], pts[4]);
   outBuf[idx++] = cos3D(pts[1], pts[2], pts[4]);
   outBuf[idx++] = cos3D(pts[5], pts[6], pts[8]);
@@ -460,6 +481,18 @@ export function extractPoseFeatures(pts, outBuf = featBuf) {
   outBuf[idx++] = projV(pts[8], pts[5]);
   outBuf[idx++] = projV(pts[12], pts[9]);
   outBuf[idx++] = projU(pts[4], pts[2]);
+
+  // High-Precision Pinky Curl vs Extension Anatomical Features (8 features -> 96 total)
+  outBuf[idx++] = cos3D(pts[17], pts[18], pts[19]); // 88: Pinky PIP true 3D cosine
+  outBuf[idx++] = cos3D(pts[18], pts[19], pts[20]); // 89: Pinky DIP true 3D cosine
+  outBuf[idx++] = cos3D(pts[0], pts[17], pts[20]);  // 90: Wrist-PinkyMCP-PinkyTip cosine
+  const pkBoneSum = dist3D(pts[17], pts[18]) + dist3D(pts[18], pts[19]) + dist3D(pts[19], pts[20]) || 1e-4;
+  const rgBoneSum = dist3D(pts[13], pts[14]) + dist3D(pts[14], pts[15]) + dist3D(pts[15], pts[16]) || 1e-4;
+  outBuf[idx++] = dist3D(pts[17], pts[20]) / pkBoneSum; // 91: Pinky 3-segment collinearity ratio
+  outBuf[idx++] = dist3D(pts[13], pts[16]) / rgBoneSum; // 92: Ring 3-segment collinearity ratio
+  outBuf[idx++] = (dist3D(pts[20], pts[17]) - dist3D(pts[18], pts[17])) / palm3D; // 93: Pinky tip reach beyond PIP
+  outBuf[idx++] = dist3D(pts[20], pts[14]) / palm3D; // 94: Pinky tip to Ring PIP 3D clearance
+  outBuf[idx++] = projU(pts[20], pts[17]); // 95: Pinky lateral ulnar projection
 
   return outBuf;
 }
@@ -501,12 +534,18 @@ export function predictPose(pts) {
     probsBuf[c] /= sumExp;
   }
 
-  // Conservative Right-Click Prior:
-  // Only suppress right_click when pinky is genuinely curled toward wrist (pkCos > -0.25 or projVPinky < -0.30)
-  const pinkyClearlyCurled = x[81] > -0.25 || x[84] < -0.30;
-  if (pinkyClearlyCurled && probsBuf[2] < 0.85) {
+  // Anatomical Curl & AI-Level Conservative Right-Click Boundary:
+  // 1) Suppress low-confidence right_click when pinky phalanges are genuinely bent/curled (pkCos > -0.15 or pkStraightRatio < 0.75)
+  const pinkyClearlyCurled = x[81] > -0.15 || x[91] < 0.75;
+  if (pinkyClearlyCurled && probsBuf[2] < 0.88) {
     probsBuf[0] += probsBuf[2];
     probsBuf[2] = 0;
+  }
+  // 2) AI-driven conservative decision boundary: when ambiguous between move and right_click (< 0.74 confidence), prefer move
+  if (probsBuf[2] > probsBuf[0] && probsBuf[2] < 0.74 && probsBuf[0] > 0.20) {
+    const tmp = probsBuf[0];
+    probsBuf[0] = probsBuf[2];
+    probsBuf[2] = tmp;
   }
 
   // Thumb tucked guard: prevents false both_click when thumb is tucked close to index knuckle

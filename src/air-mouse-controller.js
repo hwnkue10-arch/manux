@@ -208,18 +208,20 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const d3PinkyWrist = dPinkyWrist;
   const pkCos = cos3D(points[17], points[18], points[20]);
   const pkCosDIP = cos3D(points[18], points[19], points[20]);
+  const pkBoneLen = distZDamped(points[17], points[18]) + distZDamped(points[18], points[19]) + distZDamped(points[19], points[20]) || 1e-4;
+  const pkStraightRatio = distZDamped(points[17], points[20]) / pkBoneLen;
+  const pkReachBeyondPIP = (distZDamped(points[20], points[17]) - distZDamped(points[18], points[17])) / palm;
   const ringSpan = Math.max(0.20 * palm, distZDamped(points[16], points[13]));
   const pkVsRing = distZDamped(points[20], points[17]) / ringSpan;
   const dPinkyRingTip = distZDamped(points[20], points[16]) / palm;
   const projVPinky = projV(points[20], points[17]);
 
-  // Conservative Right-Click: 새끼손가락이 주먹 속에 웅크려 닫힌 자세만 확실히 차단하고,
-  // 외측으로 편안하게 펼친 자연스러운 우클릭 자세는 힘들이지 않고 부드럽게 감지
-  const pkStraight = pkCos < (wasPinkyDown ? -0.15 : -0.26);
+  // Anatomical Pinky Straightness & Fist Rejection (No artificial projV / wrist distance block that fights AI)
+  const pkStraight = pkCos < (wasPinkyDown ? -0.15 : -0.26) && pkCosDIP < (wasPinkyDown ? 0.15 : -0.10);
   const pinkyStraight = pkStraight;
-  const isPinkyClenched = dPinkyWrist < (wasPinkyDown ? 0.32 : 0.40) ||
-                          (dPinkyWrist < (wasPinkyDown ? 0.45 : 0.60) && dPinkyRingTip < 0.20 && pkVsRing < 1.00) ||
-                          projVPinky < (wasPinkyDown ? -0.35 : -0.32);
+  const isPinkyClenched = (dPinkyWrist < (wasPinkyDown ? 0.45 : 0.60) && dPinkyMCP < 0.65 && dPinkyRingTip < 0.20 && pkVsRing < 1.00) ||
+                          pkStraightRatio < (wasPinkyDown ? 0.72 : 0.78) ||
+                          pkReachBeyondPIP < (wasPinkyDown ? 0.06 : 0.12);
 
   const rawPinkyExtended = !isPinkyClenched && pkStraight && (
     wasPinkyDown
@@ -227,8 +229,11 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
       : (dPinkyMCP > 0.25 && pkVsRing > 1.04 && dPinkyRingTip > 0.16)
   );
 
-  // Anatomical plausibility gate for AI right-click predictions (blocks genuinely clenched fists without physical strain)
-  const pinkyConservativeOK = !isPinkyClenched && pkCos < (wasPinkyDown ? -0.10 : -0.20);
+  // Minimal anatomical sanity gate for AI right-click predictions (trusts AI while rejecting closed fists)
+  const pinkyConservativeOK = aiPoseHighConf =>
+    aiPoseHighConf
+      ? !(dPinkyWrist < 0.48 && dPinkyMCP < 0.62 && dPinkyRingTip < 0.18)
+      : (!isPinkyClenched && pkCos < (wasPinkyDown ? 0.0 : -0.15));
 
   // 4. Thumb Extension (좌클릭 - Left Click):
   const thCos234 = cos3D(points[2], points[3], points[4]);
@@ -349,9 +354,9 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     let effOpenPalm = openPalmPosture;
 
     const aiPose = hybridAI ? (smoothedAI ?? predictPose(landmarks)) : null;
-    if (aiPose && aiPose.confidence >= 0.65) {
-      const aiRightOK = aiPose.confidence >= (wasPinkyDown ? 0.60 : 0.65) && pinkyConservativeOK;
-      const aiLeftOK = thumbConservativeOK;
+    if (aiPose && aiPose.confidence >= 0.45) {
+      const aiRightOK = aiPose.confidence >= (wasPinkyDown ? 0.58 : 0.68) && pinkyConservativeOK(aiPose.confidence >= 0.85);
+      const aiLeftOK = aiPose.confidence >= 0.65 && thumbConservativeOK;
       if (wasScrolling && isScrollGesture) {
         // Maintain active V-sign scroll when the hand physically holds V-sign
         effIsScroll = true;
@@ -359,26 +364,26 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
         canPressRight = false;
         effIsFist = false;
         effOpenPalm = false;
-      } else if (aiPose.action === 'both_click') {
+      } else if (aiPose.action === 'both_click' && aiPose.confidence >= 0.65) {
         canPressLeft = aiLeftOK || rawThumbExtended;
-        canPressRight = aiRightOK || rawPinkyExtended;
+        canPressRight = aiRightOK;
         effIsFist = false;
         effOpenPalm = false;
         effIsScroll = false;
-      } else if (aiPose.action === 'left_click') {
+      } else if (aiPose.action === 'left_click' && aiPose.confidence >= 0.65) {
         canPressLeft = aiLeftOK || rawThumbExtended;
         canPressRight = false;
         effIsFist = false;
         effOpenPalm = false;
         effIsScroll = false;
       } else if (aiPose.action === 'right_click') {
-        // Conservative right-click: only trigger when pinky is unmistakably extended & AI is confident
-        canPressRight = aiRightOK || rawPinkyExtended;
+        // AI-driven right-click: follow AI decision cleanly without artificial coordinate blocks
+        canPressRight = aiRightOK;
         canPressLeft = false;
         effIsFist = false;
         effOpenPalm = false;
         effIsScroll = false;
-      } else if (aiPose.action === 'scroll') {
+      } else if (aiPose.action === 'scroll' && aiPose.confidence >= 0.65) {
         // Enforce strict mutual exclusivity and verify index+middle are not curled into a fist
         const vSignPlausible = cos3D(points[5], points[6], points[8]) < -0.15 &&
                                cos3D(points[9], points[10], points[12]) < -0.15 &&
@@ -400,7 +405,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
         }
       } else if (aiPose.action === 'move') {
         const keepThumbHold = wasThumbDown && rawThumbExtended && aiPose.confidence < 0.92;
-        const clearlyClenchedFist = isFist && cos3D(points[5], points[6], points[8]) > 0.15 && !rawThumbExtended && !rawPinkyExtended;
+        const clearlyClenchedFist = aiPose.confidence < 0.85 && isFist && cos3D(points[5], points[6], points[8]) > 0.15 && !rawThumbExtended && !rawPinkyExtended;
         canPressLeft = keepThumbHold;
         canPressRight = false;
         effIsScroll = false;
