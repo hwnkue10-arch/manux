@@ -91,7 +91,7 @@ class OneEuroFilter {
   }
 }
 
-function observation(landmarks, width, height, previousPinch, allowVScroll = false, pointerMode = 'index') {
+function observation(landmarks, width, height, previousPinch, allowVScroll = false, pointerMode = 'index', activeZone = {x: 0.28, y: 0.20, w: 0.44, h: 0.48}) {
   if (!Array.isArray(landmarks) || landmarks.length !== 21 || !Number.isFinite(width) ||
       !Number.isFinite(height) || width <= 0 || height <= 0) return null;
   const isIndexLike = pointerMode === 'index' || pointerMode === 'trigger';
@@ -178,10 +178,15 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     const dvMCP = projV(points[base + 3], points[base]);
     const dvPIP = projV(points[base + 3], points[base + 1]);
     const cosWristMCP = cos3D(points[0], points[base], points[base + 3]);
-    const forwardFromWrist = dvMCP > (isHold ? -0.02 : 0.16) && dvPIP > (isHold ? -0.06 : 0.02) && cosWristMCP < (isHold ? 0.12 : -0.15);
+    const cosFinger = cos3D(points[base], points[base + 1], points[base + 3]);
+    // 손가락이 3D로 꼿꼿이 펴져 있으면(cosFinger < -0.65) 카메라 정면 조준 시 dvPIP 단축 허용
+    const isVeryStraight = cosFinger < -0.65;
+    const forwardFromWrist = dvMCP > (isHold ? -0.02 : (isVeryStraight ? 0.08 : 0.16)) &&
+                             dvPIP > (isHold ? -0.06 : (isVeryStraight ? -0.03 : 0.02)) &&
+                             cosWristMCP < (isHold ? 0.12 : -0.15);
     const minCos = isHold ? 0.0 : -0.38;
-    const minReach = isHold ? 0.95 : 1.20;
-    const uncurled = cos3D(points[base], points[base + 1], points[base + 3]) < minCos &&
+    const minReach = isHold ? 0.95 : 1.15;
+    const uncurled = cosFinger < minCos &&
       distZDamped(points[base + 3], points[base]) > distZDamped(points[base + 1], points[base]) * minReach;
     return forwardFromWrist && (uncurled || extended(base));
   };
@@ -245,29 +250,27 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   const thumbExtended = !isVSignScroll && thStraight && thAbducted && thReach && thClearance;
 
   // 4. Pinky Extension (우클릭 - Right Click):
-  //    소지 3D 직선도(cos3D), 심지굴근 연동에 따른 DIP 자연 굴곡 허용, 약지 대비 원위 전진 및 이격 검증
   const dPinkyMCP = distZDamped(points[20], points[17]) / palm;
   const dPinkyWrist = distZDamped(points[20], points[0]) / palm;
   const d3PinkyMCP = dPinkyMCP;
   const d3PinkyWrist = dPinkyWrist;
   const pkCos = cos3D(points[17], points[18], points[20]);
   const pkCosDIP = cos3D(points[18], points[19], points[20]);
-  const ringSpan = Math.max(0.22 * palm, distZDamped(points[16], points[13]));
+  const ringSpan = Math.max(0.20 * palm, distZDamped(points[16], points[13]));
   const pkVsRing = distZDamped(points[20], points[17]) / ringSpan;
   const dPinkyRingTip = distZDamped(points[20], points[16]) / palm;
+  const projVPinky = projV(points[20], points[17]);
 
-  // 소지 직선도: MCP-PIP(pkCos)가 뻗어있고, 중/약지 주먹 결속으로 인한 DIP 미세 굴곡(pkCosDIP)은 유연하게 수용
-  const pkStraight = pkCos < (wasPinkyDown ? -0.25 : -0.36) && (pkCosDIP < (wasPinkyDown ? -0.15 : -0.22) || pkCos < -0.55);
+  // DIP 꺾임 허용, PIP(pkCos)만 적당히 펴지고 주먹(dPinkyMCP <= 0.22)만 아니면 통과
+  const pkStraight = pkCos < (wasPinkyDown ? -0.15 : -0.26);
   const pinkyStraight = pkStraight;
-
-  // 소지(Pinky) 전개 검증: 주먹으로 말려들어간 상태(isPinkyClenched) 완전 차단 및 너클 대비 +v 원위 전진 검증
-  const isPinkyClenched = dist2D(points[20], points[0]) < palm * 0.95 && dist2D(points[20], points[17]) < palm * 0.38;
-  const pinkyForward = projV(points[20], points[17]) > (wasPinkyDown ? 0.03 : 0.06);
+  const pinkyForward = projVPinky > (wasPinkyDown ? 0.01 : 0.04);
+  const isPinkyClenched = dPinkyWrist < 0.82 && dPinkyMCP < 0.22;
 
   const pinkyExtended = !isVSignScroll && !isPinkyClenched && pinkyForward && pkStraight && (
     wasPinkyDown
-      ? (dPinkyMCP > 0.28 && pkVsRing > 1.08 && dPinkyRingTip > 0.20)
-      : (dPinkyMCP > 0.34 && pkVsRing > 1.16 && dPinkyRingTip > 0.24)
+      ? (dPinkyMCP > 0.22 && pkVsRing > 1.02 && dPinkyRingTip > 0.15)
+      : (dPinkyMCP > 0.26 && pkVsRing > 1.06 && dPinkyRingTip > 0.19)
   );
 
   const triggerAllFourFolded = !indexAiming && !middleRaised && !pinkyExtended;
@@ -355,22 +358,30 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     gates = {
       isFist,
       isScrollGesture,
+      openPalm: openPalmPosture,
       indexAiming,
       indexStraight,
       isIndexStraight: indexStraight,
+      indexCos: Number(cos3D(points[5], points[6], points[8]).toFixed(3)),
       middleRaised,
       ringOpen,
       indexFolded: !indexAiming,
       canPressLeft,
       canPressRight,
       thumbExtended,
+      dThumbMCP: Number(dThumbMCP.toFixed(3)),
+      dThumbWrist: Number(d3ThumbWrist.toFixed(3)),
+      dThumbBase: Number(d3ThumbIndexMCP.toFixed(3)),
+      d3ThumbToKnuckles: Number(d3ThumbToKnuckles.toFixed(3)),
       pinkyExtended,
-      pinkyStraight,
-      dThumbWrist: d3ThumbWrist,
-      dThumbBase: d3ThumbIndexMCP,
-      dPinkyWrist: d3PinkyWrist,
-      dPinkyMCP: d3PinkyMCP,
-      d3ThumbToKnuckles,
+      pinkyStraight: pkStraight,
+      pkCos: Number(pkCos.toFixed(3)),
+      pkCosDIP: Number(pkCosDIP.toFixed(3)),
+      dPinkyWrist: Number(dPinkyWrist.toFixed(3)),
+      dPinkyMCP: Number(dPinkyMCP.toFixed(3)),
+      pkVsRing: Number(pkVsRing.toFixed(3)),
+      dPinkyRingTip: Number(dPinkyRingTip.toFixed(3)),
+      projV_pinky: Number(projVPinky.toFixed(3)),
     };
   } else if (pointerMode === 'index') {
     // === ERGONOMIC PARADIGM: Absolute 1:1 Mapping + Pure Gesture 2 Scroll + Independent Clicks ===
@@ -458,21 +469,27 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
   }
 
   // Deadzone-free compact active zone mapping coordinates (0 ~ 1 normalized across comfortable desk view)
-  const mirroredX = 1.0 - (points[8].x);
+  const zoneX = activeZone?.x ?? 0.28;
+  const zoneY = activeZone?.y ?? 0.20;
+  const zoneW = activeZone?.w ?? activeZone?.width ?? 0.44;
+  const zoneH = activeZone?.h ?? activeZone?.height ?? 0.48;
+  const rawCamX = clamp(landmarks[8].x, 0, 1);
+  const rawCamY = clamp(landmarks[8].y, 0, 1);
+  const mirroredX = 1.0 - rawCamX;
   const activePos = {
-    x: clamp((mirroredX - 0.28) / 0.44, 0, 1),
-    y: clamp((points[8].y - 0.20) / 0.48, 0, 1),
+    x: clamp((mirroredX - zoneX) / Math.max(0.05, zoneW), 0, 1),
+    y: clamp((rawCamY - zoneY) / Math.max(0.05, zoneH), 0, 1),
   };
 
   let fingertips;
   if (pointerMode === 'trigger') {
     fingertips = {
-      index: {x: points[8].x, y: points[8].y, visible: true, frozen: Boolean(gates?.indexFolded)},
-      thumb: {x: points[4].x, y: points[4].y, visible: Boolean(gates?.thumbExtended), active: Boolean(gates?.canPressLeft)},
-      middle: {x: points[12].x, y: points[12].y, visible: Boolean(gates?.isScrollGesture), active: Boolean(gates?.isScrollGesture)},
-      ring: {x: points[16].x, y: points[16].y, visible: false, active: false},
-      pinky: {x: points[20].x, y: points[20].y, visible: Boolean(gates?.pinkyExtended), active: Boolean(gates?.canPressRight)},
-      wrist: {x: points[0].x, y: points[0].y, visible: true},
+      index: {x: landmarks[8].x, y: landmarks[8].y, visible: true, frozen: Boolean(gates?.indexFolded)},
+      thumb: {x: landmarks[4].x, y: landmarks[4].y, visible: Boolean(gates?.thumbExtended), active: Boolean(gates?.canPressLeft)},
+      middle: {x: landmarks[12].x, y: landmarks[12].y, visible: Boolean(gates?.isScrollGesture), active: Boolean(gates?.isScrollGesture)},
+      ring: {x: landmarks[16].x, y: landmarks[16].y, visible: false, active: false},
+      pinky: {x: landmarks[20].x, y: landmarks[20].y, visible: Boolean(gates?.pinkyExtended), active: Boolean(gates?.canPressRight)},
+      wrist: {x: landmarks[0].x, y: landmarks[0].y, visible: true},
     };
   } else if (pointerMode === 'index') {
     const isFist = gates?.isFist;
@@ -482,21 +499,21 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
     const thumbActive = dist2D(points[4], points[0]) > palm * 0.60 && !isFist;
 
     fingertips = {
-      index: {x: points[8].x, y: points[8].y, visible: indexAiming},
-      thumb: {x: points[4].x, y: points[4].y, visible: thumbActive},
-      middle: {x: points[12].x, y: points[12].y, visible: middleActive},
-      ring: {x: points[16].x, y: points[16].y, visible: ringActive},
-      pinky: {x: points[20].x, y: points[20].y, visible: pinkyActive},
-      wrist: {x: points[0].x, y: points[0].y, visible: true},
+      index: {x: landmarks[8].x, y: landmarks[8].y, visible: indexAiming},
+      thumb: {x: landmarks[4].x, y: landmarks[4].y, visible: thumbActive},
+      middle: {x: landmarks[12].x, y: landmarks[12].y, visible: middleActive},
+      ring: {x: landmarks[16].x, y: landmarks[16].y, visible: ringActive},
+      pinky: {x: landmarks[20].x, y: landmarks[20].y, visible: pinkyActive},
+      wrist: {x: landmarks[0].x, y: landmarks[0].y, visible: true},
     };
   } else {
     fingertips = {
-      index: {x: points[8].x, y: points[8].y, visible: true},
-      thumb: {x: points[4].x, y: points[4].y, visible: true},
-      middle: {x: points[12].x, y: points[12].y, visible: true},
-      ring: {x: points[16].x, y: points[16].y, visible: true},
-      pinky: {x: points[20].x, y: points[20].y, visible: true},
-      wrist: {x: points[0].x, y: points[0].y, visible: true},
+      index: {x: landmarks[8].x, y: landmarks[8].y, visible: true},
+      thumb: {x: landmarks[4].x, y: landmarks[4].y, visible: true},
+      middle: {x: landmarks[12].x, y: landmarks[12].y, visible: true},
+      ring: {x: landmarks[16].x, y: landmarks[16].y, visible: true},
+      pinky: {x: landmarks[20].x, y: landmarks[20].y, visible: true},
+      wrist: {x: landmarks[0].x, y: landmarks[0].y, visible: true},
     };
   }
 
@@ -509,7 +526,7 @@ function observation(landmarks, width, height, previousPinch, allowVScroll = fal
 
 /** Pure landmark-to-input controller. It never sends OS events or stores camera data. */
 export class AirMouseController {
-  constructor({pointerMode = 'palm', sensitivity = 1800, smoothing = 0.45, holdMs = 160, ballistics = false, clickLock = false, vScroll = false, rotationDeg = 0, gainY = 1.0} = {}) {
+  constructor({pointerMode = 'palm', sensitivity = 1800, smoothing = 0.45, holdMs = 160, ballistics = false, clickLock = false, vScroll = false, rotationDeg = 0, gainY = 1.0, activeZone = {x: 0.28, y: 0.20, w: 0.44, h: 0.48}} = {}) {
     if (!Number.isFinite(sensitivity) || sensitivity < 100 || sensitivity > 6000 ||
         !Number.isFinite(smoothing) || smoothing <= 0 || smoothing > 1 ||
         !Number.isFinite(holdMs) || holdMs < 0 || holdMs > 2000) {
@@ -524,6 +541,8 @@ export class AirMouseController {
     this.vScroll = Boolean(vScroll);
     this.rotationDeg = Number.isFinite(rotationDeg) ? rotationDeg : 0;
     this.gainY = Number.isFinite(gainY) ? gainY : 1.0;
+    this.activeZone = activeZone;
+    this.lastGates = null;
     this.euroU = new OneEuroFilter({minCutoff: 0.25, beta: 9.0});
     this.euroV = new OneEuroFilter({minCutoff: 0.25, beta: 9.0});
     this.euroThumbX = new OneEuroFilter({minCutoff: 0.35, beta: 8.0});
@@ -554,6 +573,19 @@ export class AirMouseController {
     this.reset();
   }
 
+  setActiveZone(zone) {
+    if (zone && Number.isFinite(zone.x) && Number.isFinite(zone.y)) {
+      this.activeZone = {
+        x: clamp(Number(zone.x), 0, 0.85),
+        y: clamp(Number(zone.y), 0, 0.85),
+        w: clamp(Number(zone.w ?? zone.width), 0.10, 1.0),
+        h: clamp(Number(zone.h ?? zone.height), 0.10, 1.0),
+      };
+    } else {
+      this.activeZone = {x: 0.28, y: 0.20, w: 0.44, h: 0.48};
+    }
+  }
+
   state(phase, events = [], progress = 0, extras = {}) {
     return {
       mode:this.mode,
@@ -563,6 +595,7 @@ export class AirMouseController {
       pinch:this.pinch ?? null,
       fingertips:this.lastFingertips ?? null,
       activePos:this.lastActivePos ?? null,
+      gates:this.lastGates ?? null,
       ...extras
     };
   }
@@ -688,7 +721,8 @@ export class AirMouseController {
     const gap = this.lastTime !== null && now - this.lastTime > MAX_GAP_MS;
     this.lastTime = now;
     const isIndexLike = this.pointerMode === 'index' || this.pointerMode === 'trigger';
-    const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll, this.pointerMode) : null;
+    const observed = quality === true ? observation(landmarks, width, height, this.pinch, this.vScroll, this.pointerMode, this.activeZone) : null;
+    if (observed?.gates) this.lastGates = observed.gates;
     if (!observed) {
       // Index/Trigger mode: a few dropped/poor frames must not break an ongoing drag.
       if (isIndexLike && (this.leftDown || this.rightDown) &&

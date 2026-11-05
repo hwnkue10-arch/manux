@@ -1,5 +1,14 @@
 import {AirMouseController} from './air-mouse-controller.js';
 
+const LANDMARK_NAMES = [
+  'WRIST',
+  'THUMB_CMC', 'THUMB_MCP', 'THUMB_IP', 'THUMB_TIP',
+  'INDEX_FINGER_MCP', 'INDEX_FINGER_PIP', 'INDEX_FINGER_DIP', 'INDEX_FINGER_TIP',
+  'MIDDLE_FINGER_MCP', 'MIDDLE_FINGER_PIP', 'MIDDLE_FINGER_DIP', 'MIDDLE_FINGER_TIP',
+  'RING_FINGER_MCP', 'RING_FINGER_PIP', 'RING_FINGER_DIP', 'RING_FINGER_TIP',
+  'PINKY_MCP', 'PINKY_PIP', 'PINKY_DIP', 'PINKY_TIP'
+];
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 export class MouseWorkspace {
@@ -45,6 +54,12 @@ export class MouseWorkspace {
         vScroll: true,
         rotationDeg: crossView ? -22 : 0,
         gainY: crossView ? 2.2 : 1.0,
+        activeZone: {
+          x: this.activeZone.x,
+          y: this.activeZone.y,
+          w: this.activeZone.width,
+          h: this.activeZone.height,
+        },
       });
     };
 
@@ -156,8 +171,15 @@ export class MouseWorkspace {
     this.$('#btn-win-max')?.addEventListener('click', () => this.bridge?.maximize());
     this.$('#btn-win-close')?.addEventListener('click', () => this.bridge?.close());
 
+    this.$('#overlay-dump-btn')?.addEventListener('click', () => {
+      this.triggerDebugDump();
+    });
+
     window.addEventListener('keydown', event => {
-      if (event.key === 'F11') {
+      if (event.key === 'F4') {
+        event.preventDefault();
+        this.triggerDebugDump();
+      } else if (event.key === 'F11') {
         event.preventDefault();
         void this.toggleOverlay(!this.overlayActive);
       } else if (event.key === 'Escape' && this.overlayActive) {
@@ -278,6 +300,12 @@ export class MouseWorkspace {
       width: clamp(Number(zone.width) || 0.60, 0.20, 0.95),
       height: clamp(Number(zone.height) || 0.55, 0.20, 0.95),
     };
+    this.controller?.setActiveZone({
+      x: this.activeZone.x,
+      y: this.activeZone.y,
+      w: this.activeZone.width,
+      h: this.activeZone.height,
+    });
     try {
       localStorage.setItem('manux_active_zone', JSON.stringify(this.activeZone));
     } catch {}
@@ -499,30 +527,16 @@ export class MouseWorkspace {
     if (!this.active && !this.overlayActive) return null;
     if (this.enabled && latency > 450) this.stop('추적 지연이 높아 제어를 껐습니다. 해상도를 낮추고 다시 켜보세요.');
 
-    // Pure 100% unchanged AirMouseController execution
-    const state = this.controller.update({landmarks, now, quality, handedness, width, height, enabled: this.enabled});
+    // Cache frame diagnostics for F4 debug snapshot
+    this.lastLandmarks = landmarks;
+    this.lastDimensions = {width, height};
+    this.lastLatency = latency;
 
-    // Remap coordinates from controller's default box (0.28, 0.20, 0.44, 0.48) to custom Active Zone
-    const zone = this.activeZone;
-    if (zone && state) {
-      if (Array.isArray(state.events)) {
-        for (const ev of state.events) {
-          if (ev.type === 'moveTo') {
-            const mirroredX = ev.x * 0.44 + 0.28;
-            const ptY = ev.y * 0.48 + 0.20;
-            ev.x = clamp((mirroredX - zone.x) / zone.width, 0, 1);
-            ev.y = clamp((ptY - zone.y) / zone.height, 0, 1);
-          }
-        }
-      }
-      if (state.activePos) {
-        const mirroredX = state.activePos.x * 0.44 + 0.28;
-        const ptY = state.activePos.y * 0.48 + 0.20;
-        state.activePos = {
-          x: clamp((mirroredX - zone.x) / zone.width, 0, 1),
-          y: clamp((ptY - zone.y) / zone.height, 0, 1),
-        };
-      }
+    // Pure AirMouseController execution with activeZone natively applied
+    const state = this.controller.update({landmarks, now, quality, handedness, width, height, enabled: this.enabled});
+    this.lastMouseState = state;
+    if (state?.gates) {
+      this.lastGates = state.gates;
     }
 
     if (this.enabled) {
@@ -734,5 +748,107 @@ export class MouseWorkspace {
       }
       ctx.restore();
     }
+  }
+  triggerDebugDump() {
+    try {
+      const now = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const timeStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const prefix = `manux_dump_${timeStr}`;
+
+      const video = this.$('#camera') || document.querySelector('video');
+      const lmCanvas = this.$('#landmarks') || document.querySelector('canvas#landmarks');
+
+      // 1. Capture snapshot image (Webcam Video + Skeleton Canvas)
+      let snapDataUrl = null;
+      if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+        const snapCanvas = document.createElement('canvas');
+        snapCanvas.width = video.videoWidth;
+        snapCanvas.height = video.videoHeight;
+        const sctx = snapCanvas.getContext('2d');
+        try {
+          sctx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
+          if (lmCanvas && lmCanvas.width > 0) {
+            sctx.drawImage(lmCanvas, 0, 0, snapCanvas.width, snapCanvas.height);
+          }
+          snapDataUrl = snapCanvas.toDataURL('image/png');
+        } catch (e) {
+          console.warn('Canvas snapshot capture failed:', e);
+        }
+      }
+
+      if (snapDataUrl) {
+        const aImg = document.createElement('a');
+        aImg.download = `${prefix}.png`;
+        aImg.href = snapDataUrl;
+        document.body.appendChild(aImg);
+        aImg.click();
+        document.body.removeChild(aImg);
+      }
+
+      // 2. Build structured JSON telemetry
+      const dumpData = {
+        timestamp: now.toISOString(),
+        resolution: this.lastDimensions || {
+          width: video?.videoWidth || 640,
+          height: video?.videoHeight || 480
+        },
+        activeZone: this.activeZone,
+        mouseState: {
+          mode: this.lastMouseState?.mode || (this.enabled ? 'idle' : 'disabled'),
+          cursorScreen: this.lastMouseState?.activePos || null,
+          cursorDesktopPixels: this.lastMouseState?.activePos ? {
+            x: Math.round(this.lastMouseState.activePos.x * (window.screen?.width || 1920)),
+            y: Math.round(this.lastMouseState.activePos.y * (window.screen?.height || 1080))
+          } : null,
+          buttons: {
+            left: Boolean(this.controller?.leftDown),
+            right: Boolean(this.controller?.rightDown),
+            scroll: this.lastMouseState?.mode === 'scroll',
+          }
+        },
+        landmarks: (this.lastLandmarks || []).map((pt, idx) => ({
+          id: idx,
+          name: LANDMARK_NAMES[idx] || `POINT_${idx}`,
+          x: Number(pt.x.toFixed(4)),
+          y: Number(pt.y.toFixed(4)),
+          z: Number((pt.z ?? 0).toFixed(4)),
+        })),
+        internalGates: this.lastGates || this.controller?.lastGates || {},
+        screenshotFile: snapDataUrl ? `${prefix}.png` : null,
+      };
+
+      const jsonStr = JSON.stringify(dumpData, null, 2);
+      const jsonBlob = new Blob([jsonStr], { type: 'application/json' });
+      const jsonUrl = URL.createObjectURL(jsonBlob);
+      const aJson = document.createElement('a');
+      aJson.download = `${prefix}.json`;
+      aJson.href = jsonUrl;
+      document.body.appendChild(aJson);
+      aJson.click();
+      document.body.removeChild(aJson);
+      URL.revokeObjectURL(jsonUrl);
+
+      this.showToast('📸 F4 덤프 완료 (JSON + 스크린샷 저장됨)');
+    } catch (err) {
+      console.error('F4 dump failed:', err);
+      this.status(`덤프 실패: ${err.message}`, true);
+    }
+  }
+
+  showToast(messageText) {
+    let toast = this.$('#manux-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'manux-toast';
+      toast.className = 'manux-toast';
+      document.body.appendChild(toast);
+    }
+    toast.textContent = messageText;
+    toast.classList.add('show');
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => {
+      toast.classList.remove('show');
+    }, 2500);
   }
 }

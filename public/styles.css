@@ -854,3 +854,30 @@ body.overlay-mode.show-pip #overlay-pip-box {
   .mouse-guide { grid-template-columns: 1fr; }
   footer { padding: 20px 24px; flex-direction: column; gap: 8px; }
 }
+
+/* F4 Dump & System Toast Notification */
+.manux-toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: rgba(17, 35, 49, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid #46e5bd;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 15px rgba(70, 229, 189, 0.35);
+  border-radius: 100px;
+  padding: 10px 24px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  z-index: 1000000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.manux-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
