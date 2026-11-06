@@ -11,7 +11,7 @@
     <img src="https://img.shields.io/badge/Desktop-Electron_v45-47848F?style=flat-square&logo=electron&logoColor=white" alt="Desktop" />
     <img src="https://img.shields.io/badge/AI_Vision-MediaPipe_Tasks-0078D4?style=flat-square&logo=google&logoColor=white" alt="MediaPipe" />
     <img src="https://img.shields.io/badge/Custom_AI_Model-SpatialPoseModel_(Zero--GC)-8A2BE2?style=flat-square" alt="Custom AI Model" />
-    <img src="https://img.shields.io/badge/Trained_Samples-11%2C828_Gold_Dataset-success?style=flat-square" alt="Trained Samples" />
+    <img src="https://img.shields.io/badge/Trained_Samples-12%2C150_Gold_Dataset-success?style=flat-square" alt="Trained Samples" />
     <img src="https://img.shields.io/badge/Inference_Speed-0.003ms_(3.0μs)-yellow?style=flat-square" alt="Inference Speed" />
   </p>
   <p align="center">
@@ -68,14 +68,14 @@ flowchart LR
 * **출력층**: 6개 액션 클래스 Softmax 확률 분포 + AI 주도 보수적 결정 경계 (`move`, `left_click`, `right_click`, `both_click`, `scroll`, `idle`)
 
 ### 3. 지속적 학습(Continual Learning) 및 검증 지표
-사용자가 `Pose Snapshot Studio`로 수집한 **총 11,828개 실제 손 관절 데이터셋(16개 파일)**을 점진 학습(Continual Training)했습니다.
+사용자가 `Pose Snapshot Studio`로 수집한 **총 12,150개 실제 손 관절 데이터셋(17개 파일)**을 점진 학습(Continual Training)했습니다.
 
 | 검증 지표 | 달성 수치 | 의미 및 기술적 성과 |
 | :--- | :---: | :--- |
-| **누적 학습 데이터셋** | **11,828개 표본** | 골드 기준 데이터 + 2~9차 취약 각도/채터링/휴식 코너케이스 전수 수집 |
-| **5-Fold 교차 검증** | **96.69%** | 5개 Fold 전 구간(96.24%~96.96%) 균일 성능으로 과적합 완전 배제 |
-| **홀드아웃 테스트 정확도** | **97.00%** | 2,366개 독립 테스트셋 검증 (이동/스크롤/아이들/클릭 전 영역 고른 정확도) |
-| **9차 최종 교육 데이터셋 개선율** | **48.54% ➔ 99.03%** | 손 쉴 때 의도치 않은 마우스 이동/스크롤 튀는 현상(106건) ➔ **0건 (100% 해결, 204/206 일치, SYS 99.51%)** |
+| **누적 학습 데이터셋** | **12,150개 표본** | 골드 기준 데이터 + 2~10차 취약 각도/채터링/휴식 코너케이스 전수 수집 (17개 파일) |
+| **5-Fold 교차 검증** | **96.07%** | 5개 Fold 전 구간(94.40%~97.20%) 균일 성능으로 과적합 완전 배제 |
+| **홀드아웃 테스트 정확도** | **97.16%** | 2,430개 독립 테스트셋 검증 (이동/스크롤/아이들/클릭 전 영역 고른 정확도) |
+| **10차 최종 idle 보정 데이터셋 개선율** | **61.18% ➔ 100.00%** | 손 쉴 때 마우스 이동으로 튀던 현상(125건) ➔ **0건 (100% 완전 해결, 322/322 일치, SYS 100%)** |
 | **단일 프레임 추론 속도** | **0.0033 ms** | 초당 30만 프레임 이상 연산 가능한 초경량 온디바이스 엔진 |
 
 ---
@@ -110,7 +110,7 @@ manux/
 │
 ├── 🧠 src/                          # [핵심] 웹캠 비전, 제스처 판정 및 AI 엔진
 │   ├── ⭐ air-mouse-controller.js   # 🔥 [핵심 1: 하이브리드 제어기] 3D 정규직교기저 + AI 판정 융합 + 상호배타/안티채터링 상태머신
-│   ├── ⭐ spatial-pose-model.js     # 🔥 [핵심 2: 공간 자세 AI 모델] 11,828개 표본 기반 순수 JS 초경량 신경망 (0.003ms 추론)
+│   ├── ⭐ spatial-pose-model.js     # 🔥 [핵심 2: 공간 자세 AI 모델] 12,150개 표본 기반 순수 JS 초경량 신경망 (0.003ms 추론)
 │   ├── 📁 recorder/                 # [데이터 수집 & 검증 엔진]
 │   │   ├── ⭐ pose-snapshot-studio.js # [자세 표본 스튜디오] 단일/연속 표본 수집, 시스템 판정 vs 정답 대조, 취약 각도 검출
 │   │   └── 📄 raw-temporal-recorder.js # 시계열 원본 연속 프레임 및 라벨 어노테이션 수집 엔진
@@ -143,7 +143,7 @@ manux/
 │   └── 📁 helpers/                  # 가상 3D 손 관절 합성 픽스처 (`mouse-hand.js`)
 │
 └── 📜 scripts/                      # AI 학습 및 빌드 유틸리티
-    ├── 📄 train-spatial-model.mjs   # 11,828개 표본 대상 신경망 학습 및 JS 모델 자동 빌드
+    ├── 📄 train-spatial-model.mjs   # 12,150개 표본 대상 신경망 학습 및 JS 모델 자동 빌드
     ├── 📄 cross-validate.mjs        # 5-Fold 교차 검증 파이프라인
     ├── 📄 setup.mjs                 # 의존성 및 모델 다운로드 자동화
     └── 📄 test-desktop-mouse.mjs    # 네이티브 드라이버 dry-run 검증
